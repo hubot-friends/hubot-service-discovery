@@ -99,7 +99,7 @@ export class ServiceDiscovery {
     })
 
     // Initialize load balancer
-    this.loadBalancer = new LoadBalancer(this.registry, {
+    this.loadBalancer = new LoadBalancer({
       strategy: process.env.HUBOT_LB_STRATEGY || 'round-robin',
       logger: this.robot.logger
     })
@@ -145,6 +145,9 @@ export class ServiceDiscovery {
     })
 
     this.robot.logger.info(`🔍 Service discovery server started on port ${this.discoveryPort}`)
+    
+    // Initialize the registry before registering self
+    await this.registry.initialize()
     
     // Also register self if running as server
     await this.registerSelf()
@@ -211,6 +214,13 @@ export class ServiceDiscovery {
       case 'health':
         const allServices = this.registry.discoverAll()
         const lbStats = this.loadBalancer ? this.loadBalancer.getStats() : {}
+        
+        // Calculate healthy instances across all services
+        let healthyInstances = 0
+        for (const serviceName of Object.keys(allServices)) {
+          healthyInstances += this.registry.getHealthyInstances(serviceName).length
+        }
+        
         return { 
           success: true, 
           data: { 
@@ -218,6 +228,7 @@ export class ServiceDiscovery {
             uptime: process.uptime(),
             totalServices: Object.keys(allServices).length,
             totalInstances: Object.values(allServices).reduce((sum, instances) => sum + instances.length, 0),
+            healthyInstances,
             connectedClients: this.connectedClients.size,
             loadBalancer: lbStats
           }
@@ -307,8 +318,11 @@ export class ServiceDiscovery {
 
   async routeMessage(messageData) {
     try {
-      // Select an instance to handle this message
-      const selectedInstance = this.loadBalancer.selectInstance(this.serviceName, messageData)
+      // Get healthy instances from registry
+      const healthyInstances = this.registry.getHealthyInstances(this.serviceName)
+      
+      // Select an instance using load balancer
+      const selectedInstance = this.loadBalancer.selectInstance(healthyInstances)
       
       if (!selectedInstance) {
         this.robot.logger.warn('No healthy instances available for message routing')
@@ -572,11 +586,20 @@ export class ServiceDiscovery {
       // Command to show load balancer status
       this.robot.respond(/(?:load.?balancer|lb)\s+status/i, async (res) => {
         const stats = this.loadBalancer.getStats()
+        const allServices = this.registry.discoverAll()
+        
+        // Calculate total and healthy instances from registry
+        const totalInstances = Object.values(allServices).reduce((sum, instances) => sum + instances.length, 0)
+        let healthyInstances = 0
+        for (const serviceName of Object.keys(allServices)) {
+          healthyInstances += this.registry.getHealthyInstances(serviceName).length
+        }
+        
         const status = []
         status.push(`Strategy: ${stats.strategy}`)
         status.push(`Connected Clients: ${this.connectedClients.size}`)
-        status.push(`Healthy Instances: ${stats.healthyInstances}`)
-        status.push(`Total Instances: ${stats.totalInstances}`)
+        status.push(`Healthy Instances: ${healthyInstances}`)
+        status.push(`Total Instances: ${totalInstances}`)
         status.push(`Pending Responses: ${this.pendingResponses.size}`)
         
         if (stats.strategy === 'round-robin') {
@@ -661,15 +684,42 @@ export class ServiceDiscovery {
       this.discoveryWs = null
     }
     
-    // Close discovery server
+    // Close discovery server with timeout
     if (this.wss) {
-      this.wss.close()
+      try {
+        // Close all client connections first
+        for (const client of this.wss.clients || []) {
+          if (client.readyState === 1) { // WebSocket.OPEN
+            client.close()
+          }
+        }
+        
+        // Close the server with timeout
+        const serverClosePromise = new Promise((resolve) => {
+          this.wss.close(() => resolve())
+        })
+        const timeout = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('WebSocket server close timeout')), 1000)
+        )
+        await Promise.race([serverClosePromise, timeout])
+      } catch (error) {
+        this.robot?.logger?.debug('WebSocket server close error (continuing cleanup):', error.message)
+      }
       this.wss = null
     }
     
-    // Close registry
+    // Close registry with timeout
     if (this.registry) {
-      await this.registry.close()
+      try {
+        // Add timeout to prevent hanging on registry.close()
+        const registryClosePromise = this.registry.close()
+        const timeout = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Registry close timeout')), 1000)
+        )
+        await Promise.race([registryClosePromise, timeout])
+      } catch (error) {
+        this.robot?.logger?.debug('Registry close error (continuing cleanup):', error.message)
+      }
       this.registry = null
     }
     

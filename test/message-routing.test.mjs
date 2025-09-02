@@ -26,20 +26,28 @@ class MockServiceRegistry extends EventEmitter {
   discoverAll() {
     return this.services
   }
+
+  getHealthyInstances(serviceName) {
+    const serviceData = this.services[serviceName] || { instances: [] }
+    // For testing, assume all instances are healthy and filter out servers
+    return serviceData.instances.filter(instance => !instance.isServer)
+  }
 }
 
 // Mock message routing class to test the functionality
 class MessageRouter {
   constructor() {
     this.registry = new MockServiceRegistry({ heartbeatTimeoutMs: 30000 })
-    this.loadBalancer = new LoadBalancer(this.registry, { strategy: 'round-robin' })
+    this.loadBalancer = new LoadBalancer({ strategy: 'round-robin' })
     this.connectedClients = new Map()
     this.pendingResponses = new Map()
   }
 
   async routeMessage(messageData) {
     try {
-      const selectedInstance = this.loadBalancer.selectInstance('hubot', messageData)
+      // Get healthy instances from registry (simulate the new pattern)
+      const healthyInstances = this.registry.getHealthyInstances('hubot')
+      const selectedInstance = this.loadBalancer.selectInstance(healthyInstances)
       
       if (!selectedInstance) {
         return { 

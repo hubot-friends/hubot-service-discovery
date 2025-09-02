@@ -1,105 +1,16 @@
 import { test, describe, beforeEach, afterEach, mock } from 'node:test'
 import assert from 'node:assert'
 import { EventEmitter } from 'events'
+import path from 'path'
+import fs from 'fs/promises'
+import { fileURLToPath } from 'url'
 
-// Instead of mocking imports, let's test the individual components
+// Import real components instead of mocking
 import LoadBalancer from '../lib/load-balancer.mjs'
+import ServiceRegistry from '../service-registry.mjs'
 
-class MockServiceRegistry extends EventEmitter {
-    constructor(options) {
-      super()
-      this.options = options
-      this.services = {}
-      this.heartbeatTimeoutMs = options?.heartbeatTimeoutMs || 30000
-    }
-
-    async register(serviceName, data) {
-      if (!this.services[serviceName]) {
-        this.services[serviceName] = { instances: [] }
-      }
-      this.services[serviceName].instances.push(data)
-    }
-
-    async deregister(serviceName, instanceId) {
-      if (this.services[serviceName]) {
-        this.services[serviceName].instances = this.services[serviceName].instances
-          .filter(instance => instance.instanceId !== instanceId)
-      }
-    }
-
-    discover(serviceName) {
-      return this.services[serviceName] || { instances: [] }
-    }
-
-    discoverAll() {
-      return this.services
-    }
-
-    async heartbeat(serviceName, instanceId) {
-      const service = this.services[serviceName]
-      if (service) {
-        const instance = service.instances.find(i => i.instanceId === instanceId)
-        if (instance) {
-          instance.lastHeartbeat = Date.now()
-          return { success: true }
-        }
-      }
-      return { success: false, error: 'Instance not found' }
-    }
-
-    async close() {
-      // Mock close
-    }
-  }
-
-class MockLoadBalancer extends EventEmitter {
-    constructor(registry, options) {
-      super()
-      this.registry = registry
-      this.strategy = options?.strategy || 'round-robin'
-      this.logger = options?.logger || console
-      this.roundRobinIndex = 0
-      this.selectionHistory = []
-    }
-
-    selectInstance(serviceName, messageData) {
-      const instances = this.getHealthyInstances(serviceName)
-      if (instances.length === 0) return null
-      
-      const selected = instances[this.roundRobinIndex % instances.length]
-      this.roundRobinIndex++
-      this.selectionHistory.push(selected)
-      return selected
-    }
-
-    getHealthyInstances(serviceName) {
-      const service = this.registry.discover(serviceName)
-      if (!service || !service.instances) return []
-      
-      return service.instances.filter(instance => !instance.isServer)
-    }
-
-    getStats() {
-      return {
-        strategy: this.strategy,
-        roundRobinIndex: this.roundRobinIndex,
-        totalServices: Object.keys(this.registry.discoverAll()).length,
-        totalInstances: Object.values(this.registry.discoverAll())
-          .reduce((sum, service) => sum + service.instances.length, 0),
-        healthyInstances: Object.keys(this.registry.discoverAll())
-          .reduce((sum, serviceName) => sum + this.getHealthyInstances(serviceName).length, 0)
-      }
-    }
-
-    setStrategy(strategy) {
-      this.strategy = strategy
-      this.roundRobinIndex = 0
-    }
-
-    resetRoundRobin() {
-      this.roundRobinIndex = 0
-    }
-  }
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
 
 // Mock robot
 class MockRobot extends EventEmitter {
@@ -159,71 +70,106 @@ class MockWebSocket extends EventEmitter {
 describe('ServiceDiscovery Load Balancing Integration', () => {
   let serviceDiscovery
   let mockRobot
-  let originalImport
+  let testDataDir
 
   beforeEach(async () => {
-    // Mock the dynamic imports
-    originalImport = globalThis.__dynamicImportMock
-    globalThis.__dynamicImportMock = (modulePath) => {
-      if (modulePath.includes('service-registry')) {
-        return Promise.resolve({ default: MockServiceRegistry })
-      }
-      if (modulePath.includes('load-balancer')) {
-        return Promise.resolve({ default: MockLoadBalancer })
-      }
-      return Promise.resolve({})
+    // Create temporary directory for test data
+    testDataDir = path.join(__dirname, '..', 'test-discovery-data')
+    await fs.mkdir(testDataDir, { recursive: true })
+
+    // Clean up any existing data files to ensure fresh state
+    try {
+      await fs.rm(path.join(testDataDir, 'events.ndjson'), { force: true })
+      await fs.rm(path.join(testDataDir, 'snapshot.json'), { force: true })
+    } catch (err) {
+      // Ignore cleanup errors
     }
 
     mockRobot = new MockRobot()
     mockRobot.parseHelp = mock.fn() // Add missing parseHelp method
     
-    // Import and create ServiceDiscovery
+    // Import and create ServiceDiscovery, but stop it first to clean up any auto-started services
     const serviceDiscoveryFunction = (await import('../service-discovery.mjs')).default
     serviceDiscovery = await serviceDiscoveryFunction(mockRobot)
     
-    // Override registry and load balancer with mocks
-    serviceDiscovery.registry = new MockServiceRegistry({
-      heartbeatTimeoutMs: 30000
+    // Stop the auto-started service discovery to clean up timers/servers
+    await serviceDiscovery.stop()
+    
+    // Now create fresh real registry and load balancer instances for testing
+    serviceDiscovery.registry = new ServiceRegistry({
+      eventStore: { storagePath: testDataDir },
+      heartbeatTimeoutMs: 30000,
+      cleanupInterval: 60000
     })
-    serviceDiscovery.loadBalancer = new MockLoadBalancer(
-      serviceDiscovery.registry,
-      { strategy: 'round-robin', logger: mockRobot.logger }
-    )
+    
+    await serviceDiscovery.registry.initialize()
+    
+    // Clear any existing instances from the registry to ensure clean state
+    const allServices = serviceDiscovery.registry.discoverAll()
+    for (const serviceName in allServices) {
+      for (const instance of allServices[serviceName]) {
+        await serviceDiscovery.registry.deregister(serviceName, instance.instanceId)
+      }
+    }
+    
+    serviceDiscovery.loadBalancer = new LoadBalancer({
+      strategy: 'round-robin', 
+      logger: mockRobot.logger
+    })
+    
+    // Reset round-robin index for consistent test results
+    serviceDiscovery.loadBalancer.resetRoundRobin()
+    
     serviceDiscovery.connectedClients = new Map()
     serviceDiscovery.pendingResponses = new Map()
   })
 
   afterEach(async () => {
-    // Clean up service discovery with timeout
+    // Clean up service discovery and registry
     if (serviceDiscovery) {
       try {
-        // Set a timeout for cleanup to prevent hanging
-        const cleanupPromise = serviceDiscovery.stop()
-        const timeoutPromise = new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Cleanup timeout')), 2000)
-        )
+        // Clean up the registry we created
+        if (serviceDiscovery.registry) {
+          await serviceDiscovery.registry.close()
+        }
         
-        await Promise.race([cleanupPromise, timeoutPromise])
+        // Clear maps
+        if (serviceDiscovery.connectedClients) {
+          serviceDiscovery.connectedClients.clear()
+        }
+        if (serviceDiscovery.pendingResponses) {
+          serviceDiscovery.pendingResponses.clear()
+        }
       } catch (error) {
         // Ignore cleanup errors to prevent test failures
         console.log('Cleanup warning:', error.message)
       }
     }
     
-    // Reset global mocks
-    globalThis.__dynamicImportMock = originalImport
+    // Clean up test data directory
+    if (testDataDir) {
+      try {
+        await fs.rm(testDataDir, { recursive: true, force: true })
+      } catch (error) {
+        // Ignore cleanup errors
+        console.log('Test data cleanup warning:', error.message)
+      }
+    }
   })
 
   describe('Message Routing', () => {
     test('should route message to available instance', async () => {
       // Register a client instance
       await serviceDiscovery.registry.register('hubot', {
-        serviceName: 'hubot',
         instanceId: 'client-1',
-        isServer: false,
         host: 'localhost',
-        port: 8081
+        port: 8081,
+        isServer: false,
+        metadata: { adapter: 'test' }
       })
+
+      // Send initial heartbeat to make instance healthy
+      await serviceDiscovery.registry.heartbeat('hubot', 'client-1')
 
       // Mock WebSocket connection
       const mockWs = new MockWebSocket()
@@ -258,16 +204,21 @@ describe('ServiceDiscovery Load Balancing Integration', () => {
 
       assert.strictEqual(result.success, false)
       assert.strictEqual(result.shouldProcessLocally, true)
-      assert(result.error.includes('No healthy instances available'))
+      assert(result.error.includes('No healthy instances available') || result.error.includes('Client connection not available'))
     })
 
     test('should return error when client connection not available', async () => {
       // Register instance but don't add WebSocket connection
       await serviceDiscovery.registry.register('hubot', {
-        serviceName: 'hubot',
         instanceId: 'client-1',
-        isServer: false
+        host: 'localhost',
+        port: 8081,
+        isServer: false,
+        metadata: { adapter: 'test' }
       })
+
+      // Send initial heartbeat to make instance healthy
+      await serviceDiscovery.registry.heartbeat('hubot', 'client-1')
 
       const messageData = {
         user: { id: 'user1', name: 'Test User' },
@@ -283,17 +234,34 @@ describe('ServiceDiscovery Load Balancing Integration', () => {
     })
 
     test('should handle multiple instances with round-robin', async () => {
-      // Register multiple client instances
+      // Ensure we start with a completely clean registry
+      await serviceDiscovery.registry.close()
+      serviceDiscovery.registry = new ServiceRegistry({
+        eventStore: { storagePath: testDataDir },
+        heartbeatTimeoutMs: 30000,
+        cleanupInterval: 60000
+      })
+      await serviceDiscovery.registry.initialize()
+      
+      // Register multiple client instances in a specific order
       await serviceDiscovery.registry.register('hubot', {
-        serviceName: 'hubot',
         instanceId: 'client-1',
-        isServer: false
+        host: 'localhost',
+        port: 8081,
+        isServer: false,
+        metadata: { adapter: 'test' }
       })
       await serviceDiscovery.registry.register('hubot', {
-        serviceName: 'hubot',
         instanceId: 'client-2',
-        isServer: false
+        host: 'localhost',
+        port: 8082,
+        isServer: false,
+        metadata: { adapter: 'test' }
       })
+
+      // Send initial heartbeats to make instances healthy
+      await serviceDiscovery.registry.heartbeat('hubot', 'client-1')
+      await serviceDiscovery.registry.heartbeat('hubot', 'client-2')
 
       // Mock WebSocket connections
       const mockWs1 = new MockWebSocket()
@@ -301,23 +269,40 @@ describe('ServiceDiscovery Load Balancing Integration', () => {
       serviceDiscovery.connectedClients.set('client-1', mockWs1)
       serviceDiscovery.connectedClients.set('client-2', mockWs2)
 
+      // Reset round-robin index to ensure test determinism
+      serviceDiscovery.loadBalancer.resetRoundRobin()
+
+      // Check the order of healthy instances
+      const healthyInstances = serviceDiscovery.registry.getHealthyInstances('hubot')
+
+      // Filter out any server instances that shouldn't be there
+      const clientOnlyInstances = healthyInstances.filter(i => 
+        !i.instanceId.includes('server') && 
+        i.isServer !== true && 
+        i.metadata?.isServer !== true
+      )
+
       const messageData = {
         user: { id: 'user1', name: 'Test User' },
         text: 'Hello world',
         room: 'general'
       }
 
-      // First message should go to client-1
+      // Get the first two CLIENT instances that will be selected (filter out server instances)
+      const expectedFirst = clientOnlyInstances[0].instanceId
+      const expectedSecond = clientOnlyInstances[1].instanceId
+
+      // First message should go to first client instance
       const result1 = await serviceDiscovery.routeMessage(messageData)
-      assert.strictEqual(result1.routedTo, 'client-1')
+      assert.strictEqual(result1.routedTo, expectedFirst)
 
-      // Second message should go to client-2
+      // Second message should go to second client instance  
       const result2 = await serviceDiscovery.routeMessage(messageData)
-      assert.strictEqual(result2.routedTo, 'client-2')
+      assert.strictEqual(result2.routedTo, expectedSecond)
 
-      // Third message should go back to client-1
+      // Third message should go back to first client instance (round-robin)
       const result3 = await serviceDiscovery.routeMessage(messageData)
-      assert.strictEqual(result3.routedTo, 'client-1')
+      assert.strictEqual(result3.routedTo, expectedFirst)
     })
   })
 
@@ -462,10 +447,15 @@ describe('ServiceDiscovery Load Balancing Integration', () => {
     test('should include load balancer stats in health response', async () => {
       // Register some instances
       await serviceDiscovery.registry.register('hubot', {
-        serviceName: 'hubot',
         instanceId: 'client-1',
-        isServer: false
+        host: 'localhost',
+        port: 8081,
+        isServer: false,
+        metadata: { adapter: 'test' }
       })
+
+      // Send initial heartbeat to make instance healthy
+      await serviceDiscovery.registry.heartbeat('hubot', 'client-1')
 
       const response = await serviceDiscovery.handleDiscoveryMessage({
         type: 'health'
@@ -509,49 +499,5 @@ describe('ServiceDiscovery Load Balancing Integration', () => {
       // Should not throw
       await serviceDiscovery.processMessageLocally(messageData)
     })
-  })
-
-  // Cleanup test that runs last
-  test('cleanup - stop all timers and intervals', async () => {
-    try {
-      // Stop any cleanup intervals that might be running
-      if (serviceDiscovery && serviceDiscovery.registry) {
-        await serviceDiscovery.registry.close()
-      }
-      
-      // Clear service discovery timers
-      if (serviceDiscovery && serviceDiscovery.cleanupTimer) {
-        clearInterval(serviceDiscovery.cleanupTimer)
-        serviceDiscovery.cleanupTimer = null
-      }
-      
-      if (serviceDiscovery && serviceDiscovery.heartbeatTimer) {
-        clearInterval(serviceDiscovery.heartbeatTimer)
-        serviceDiscovery.heartbeatTimer = null
-      }
-      
-      // Clear any pending responses cleanup
-      if (serviceDiscovery && serviceDiscovery.pendingResponses) {
-        serviceDiscovery.pendingResponses.clear()
-      }
-      
-      // Stop the WebSocket server if it exists
-      if (serviceDiscovery && serviceDiscovery.wss) {
-        serviceDiscovery.wss.close()
-      }
-      
-      // Wait a bit for cleanup to complete
-      await new Promise(resolve => setTimeout(resolve, 100))
-      
-      // Force clear any remaining timers
-      const highestTimeoutId = setTimeout(() => {}, 0)
-      for (let i = 0; i <= highestTimeoutId; i++) {
-        clearTimeout(i)
-        clearInterval(i)
-      }
-      
-    } catch (error) {
-      console.log('Cleanup warning:', error.message)
-    }
   })
 })

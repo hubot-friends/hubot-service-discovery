@@ -142,6 +142,39 @@ export class ServiceRegistry extends EventEmitter {
     return { instances, serviceName }
   }
 
+  /**
+   * Get healthy client instances for load balancing (excludes server instances)
+   * @param {string} serviceName - Name of the service
+   * @returns {Array} Array of healthy client instances
+   */
+  getHealthyInstances(serviceName) {
+    if (!this.services.has(serviceName)) {
+      return []
+    }
+
+    return Array.from(this.services.get(serviceName).values())
+      .filter(instance => {
+        // Check if instance is healthy
+        if (!this.isInstanceHealthy(instance.instanceId)) {
+          return false
+        }
+        
+        // Exclude server instances (they handle routing, not processing)
+        const isServer = instance.isServer || (instance.metadata && instance.metadata.isServer)
+        return isServer !== true
+      })
+      .map(instance => ({
+        instanceId: instance.instanceId,
+        host: instance.host,
+        port: instance.port,
+        url: `ws://${instance.host}:${instance.port}`,
+        metadata: instance.metadata || {},
+        lastSeen: this.instanceHeartbeats.get(instance.instanceId),
+        // Spread metadata fields to top-level for compatibility
+        ...instance.metadata
+      }))
+  }
+
   discoverAll() {
     const allServices = {}
     for (const serviceName of this.services.keys()) {
@@ -203,6 +236,7 @@ export class ServiceRegistry extends EventEmitter {
       instanceId,
       host,
       port,
+      ...metadata, // Spread metadata fields to top level for easier access
       metadata,
       registeredAt: event.timestamp
     })

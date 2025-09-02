@@ -222,6 +222,70 @@ describe('ServiceDiscovery Script', () => {
     assert(typeof healthResponse.data.totalInstances === 'number')
   })
 
+  test('should list healthy instances when 2 out of 3 are healthy', async () => {
+    await serviceDiscoveryScript(robot)
+
+    const serviceDiscovery = robot.serviceDiscovery
+
+    // Register 3 instances, 2 healthy and 1 unhealthy
+    await serviceDiscovery.handleDiscoveryMessage({
+      type: 'register',
+      data: {
+        serviceName: 'test-service',
+        instanceId: 'test-instance-1',
+        host: 'localhost',
+        port: 8080
+      }
+    })
+
+    await serviceDiscovery.handleDiscoveryMessage({
+      type: 'register',
+      data: {
+        serviceName: 'test-service',
+        instanceId: 'test-instance-2',
+        host: 'localhost',
+        port: 8081
+      }
+    })
+
+    await serviceDiscovery.handleDiscoveryMessage({
+      type: 'register',
+      data: {
+        serviceName: 'test-service',
+        instanceId: 'test-instance-3',
+        host: 'localhost',
+        port: 8082
+      }
+    })
+
+    // Simulate heartbeats for only 2 instances (making the 3rd unhealthy)
+    await serviceDiscovery.handleDiscoveryMessage({
+      type: 'heartbeat',
+      data: {
+        serviceName: 'test-service',
+        instanceId: 'test-instance-1'
+      }
+    })
+
+    await serviceDiscovery.handleDiscoveryMessage({
+      type: 'heartbeat',
+      data: {
+        serviceName: 'test-service',
+        instanceId: 'test-instance-2'
+      }
+    })
+
+    // Make test-instance-3 unhealthy by setting an old heartbeat timestamp
+    const oldTimestamp = Date.now() - 70000 // 70 seconds ago (past the 60-second timeout)
+    serviceDiscovery.registry.instanceHeartbeats.set('test-instance-3', oldTimestamp)
+
+    // List healthy instances using the new pattern
+    const healthyInstances = serviceDiscovery.registry.getHealthyInstances('test-service')
+    assert.strictEqual(healthyInstances.length, 2)
+    assert(healthyInstances.some(instance => instance.instanceId === 'test-instance-1'))
+    assert(healthyInstances.some(instance => instance.instanceId === 'test-instance-2'))
+  })
+
   test('should execute discover services command', async () => {
     await serviceDiscoveryScript(robot)
     

@@ -2,37 +2,11 @@ import { test, describe, beforeEach, afterEach, mock } from 'node:test'
 import assert from 'node:assert'
 import LoadBalancer from '../lib/load-balancer.mjs'
 
-// Mock registry for testing
-class MockRegistry {
-  constructor() {
-    this.services = {}
-    this.heartbeatTimeoutMs = 30000
-  }
-
-  discover(serviceName) {
-    return this.services[serviceName] || { instances: [] }
-  }
-
-  discoverAll() {
-    return this.services
-  }
-
-  addService(serviceName, instances) {
-    this.services[serviceName] = { instances }
-  }
-
-  clear() {
-    this.services = {}
-  }
-}
-
 describe('LoadBalancer', () => {
   let loadBalancer
-  let mockRegistry
   let mockLogger
 
   beforeEach(() => {
-    mockRegistry = new MockRegistry()
     mockLogger = {
       debug: mock.fn(),
       info: mock.fn(),
@@ -40,80 +14,38 @@ describe('LoadBalancer', () => {
       error: mock.fn()
     }
     
-    loadBalancer = new LoadBalancer(mockRegistry, {
+    loadBalancer = new LoadBalancer({
       strategy: 'round-robin',
       logger: mockLogger
     })
   })
 
-  afterEach(() => {
-    mockRegistry.clear()
-  })
-
   describe('constructor', () => {
     test('should initialize with default strategy', () => {
-      const lb = new LoadBalancer(mockRegistry)
+      const lb = new LoadBalancer()
       assert.strictEqual(lb.strategy, 'round-robin')
       assert.strictEqual(lb.roundRobinIndex, 0)
     })
 
     test('should initialize with custom strategy', () => {
-      const lb = new LoadBalancer(mockRegistry, { strategy: 'random' })
+      const lb = new LoadBalancer({ strategy: 'random' })
       assert.strictEqual(lb.strategy, 'random')
     })
   })
 
-  describe('getHealthyInstances', () => {
-    test('should return empty array when no instances exist', () => {
-      const instances = loadBalancer.getHealthyInstances('nonexistent-service')
-      assert.deepStrictEqual(instances, [])
-    })
-
-    test('should filter out server instances', () => {
-      const now = Date.now()
-      mockRegistry.addService('test-service', [
-        { instanceId: 'server-1', isServer: true, lastHeartbeat: now },
-        { instanceId: 'client-1', isServer: false, lastHeartbeat: now },
-        { instanceId: 'client-2', lastHeartbeat: now } // isServer undefined = false
-      ])
-
-      const instances = loadBalancer.getHealthyInstances('test-service')
-      assert.strictEqual(instances.length, 2)
-      assert.strictEqual(instances[0].instanceId, 'client-1')
-      assert.strictEqual(instances[1].instanceId, 'client-2')
-    })
-
-    test('should filter out unhealthy instances', () => {
-      const now = Date.now()
-      const oldTime = now - 60000 // 60 seconds ago
-      
-      mockRegistry.addService('test-service', [
-        { instanceId: 'healthy-1', lastHeartbeat: now },
-        { instanceId: 'unhealthy-1', lastHeartbeat: oldTime },
-        { instanceId: 'healthy-2', registeredAt: now }
-      ])
-
-      const instances = loadBalancer.getHealthyInstances('test-service')
-      assert.strictEqual(instances.length, 2)
-      assert.strictEqual(instances[0].instanceId, 'healthy-1')
-      assert.strictEqual(instances[1].instanceId, 'healthy-2')
-    })
-  })
-
   describe('selectInstance', () => {
-    test('should return null when no healthy instances available', () => {
-      const instance = loadBalancer.selectInstance('nonexistent-service')
+    test('should return null when no instances provided', () => {
+      const instance = loadBalancer.selectInstance([])
       assert.strictEqual(instance, null)
     })
 
     test('should select instance using configured strategy', () => {
-      const now = Date.now()
-      mockRegistry.addService('test-service', [
-        { instanceId: 'client-1', lastHeartbeat: now },
-        { instanceId: 'client-2', lastHeartbeat: now }
-      ])
+      const instances = [
+        { instanceId: 'client-1' },
+        { instanceId: 'client-2' }
+      ]
 
-      const instance = loadBalancer.selectInstance('test-service')
+      const instance = loadBalancer.selectInstance(instances)
       assert(instance)
       assert.strictEqual(instance.instanceId, 'client-1') // First in round-robin
     })
@@ -237,92 +169,59 @@ describe('LoadBalancer', () => {
     })
   })
 
-  describe('getStats', () => {
-    test('should return basic stats when no services exist', () => {
-      const stats = loadBalancer.getStats()
-      
-      assert.strictEqual(stats.strategy, 'round-robin')
-      assert.strictEqual(stats.roundRobinIndex, 0)
-      assert.strictEqual(stats.totalServices, 0)
-      assert.strictEqual(stats.totalInstances, 0)
-      assert.strictEqual(stats.healthyInstances, 0)
-    })
-
-    test('should calculate stats correctly with services', () => {
-      const now = Date.now()
-      mockRegistry.addService('service-1', [
-        { instanceId: 'client-1', lastHeartbeat: now },
-        { instanceId: 'server-1', isServer: true, lastHeartbeat: now }
-      ])
-      mockRegistry.addService('service-2', [
-        { instanceId: 'client-2', lastHeartbeat: now }
-      ])
-
-      const stats = loadBalancer.getStats()
-      
-      assert.strictEqual(stats.totalServices, 2)
-      assert.strictEqual(stats.totalInstances, 3)
-      assert.strictEqual(stats.healthyInstances, 2) // Excludes server instances
-    })
-  })
-
   describe('strategy integration', () => {
-    beforeEach(() => {
-      const now = Date.now()
-      mockRegistry.addService('test-service', [
-        { instanceId: 'client-1', lastHeartbeat: now, metadata: { connections: 3 } },
-        { instanceId: 'client-2', lastHeartbeat: now, metadata: { connections: 1 } },
-        { instanceId: 'client-3', lastHeartbeat: now, metadata: { connections: 5 } }
-      ])
-    })
+    const instances = [
+      { instanceId: 'client-1', metadata: { connections: 3 } },
+      { instanceId: 'client-2', metadata: { connections: 1 } },
+      { instanceId: 'client-3', metadata: { connections: 5 } }
+    ]
 
     test('should use round-robin strategy by default', () => {
-      assert.strictEqual(loadBalancer.selectInstance('test-service').instanceId, 'client-1')
-      assert.strictEqual(loadBalancer.selectInstance('test-service').instanceId, 'client-2')
-      assert.strictEqual(loadBalancer.selectInstance('test-service').instanceId, 'client-3')
-      assert.strictEqual(loadBalancer.selectInstance('test-service').instanceId, 'client-1')
+      assert.strictEqual(loadBalancer.selectInstance(instances).instanceId, 'client-1')
+      assert.strictEqual(loadBalancer.selectInstance(instances).instanceId, 'client-2')
+      assert.strictEqual(loadBalancer.selectInstance(instances).instanceId, 'client-3')
+      assert.strictEqual(loadBalancer.selectInstance(instances).instanceId, 'client-1')
     })
 
     test('should use least-connections strategy when configured', () => {
       loadBalancer.setStrategy('least-connections')
-      const instance = loadBalancer.selectInstance('test-service')
+      const instance = loadBalancer.selectInstance(instances)
       assert.strictEqual(instance.instanceId, 'client-2') // Has least connections (1)
     })
 
     test('should fall back to round-robin for unknown strategy', () => {
       loadBalancer.strategy = 'unknown-strategy' // Bypass validation
-      const instance = loadBalancer.selectInstance('test-service')
+      const instance = loadBalancer.selectInstance(instances)
       assert(instance) // Should still select an instance
       assert.strictEqual(mockLogger.warn.mock.callCount(), 1)
     })
   })
 
   describe('edge cases', () => {
-    test('should handle service with no instances', () => {
-      mockRegistry.addService('empty-service', [])
-      const instance = loadBalancer.selectInstance('empty-service')
+    test('should handle empty instances array', () => {
+      const instance = loadBalancer.selectInstance([])
       assert.strictEqual(instance, null)
     })
 
-    test('should handle registry returning null', () => {
-      // Mock discover to return null
-      mockRegistry.discover = mock.fn(() => null)
-      
-      const instance = loadBalancer.selectInstance('test-service')
+    test('should handle null instances', () => {
+      const instance = loadBalancer.selectInstance(null)
+      assert.strictEqual(instance, null)
+    })
+
+    test('should handle undefined instances', () => {
+      const instance = loadBalancer.selectInstance(undefined)
       assert.strictEqual(instance, null)
     })
 
     test('should handle instances without instanceId', () => {
-      const now = Date.now()
-      mockRegistry.addService('test-service', [
-        { lastHeartbeat: now }, // Missing instanceId
-        { instanceId: 'client-1', lastHeartbeat: now }
-      ])
+      const instances = [
+        { }, // Missing instanceId
+        { instanceId: 'client-1' }
+      ]
 
       // Should still work with valid instances
-      const instance = loadBalancer.selectInstance('test-service')
+      const instance = loadBalancer.selectInstance(instances)
       assert(instance) // Should select an instance
-      // Note: Could be either the one without instanceId or client-1, both are valid
     })
   })
 })
