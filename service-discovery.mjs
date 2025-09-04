@@ -8,7 +8,7 @@
 //   HUBOT_PORT - Port for this instance (default: 8080)
 //   HUBOT_HEARTBEAT_INTERVAL - Heartbeat interval in ms (default: 15000)
 //   HUBOT_DISCOVERY_PORT - Port for the discovery server (default: 3100)
-//   HUBOT_DISCOVERY_STORAGE - Storage directory for event store (default: ./discovery-data)
+//   HUBOT_DISCOVERY_STORAGE - Storage directory for event store (default: ./data)
 //   HUBOT_DISCOVERY_TIMEOUT - Heartbeat timeout in ms (default: 30000)
 //   HUBOT_DISCOVERY_URL - URL of discovery server to connect to (optional, for client-only mode)
 //   HUBOT_DISCOVERY_RECONNECT_INTERVAL - Client reconnection interval in ms (default: 5000)
@@ -34,6 +34,7 @@ import LoadBalancer from './lib/load-balancer.mjs'
 import { WebSocketServer } from 'ws'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
+import { TextMessage } from 'hubot'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -49,7 +50,7 @@ export class ServiceDiscovery {
     
     // Service discovery server configuration (if this instance should run the server)
     this.discoveryPort = parseInt(process.env.HUBOT_DISCOVERY_PORT || 3100)
-    this.storageDir = process.env.HUBOT_DISCOVERY_STORAGE || join(process.cwd(), 'discovery-data')
+    this.storageDir = process.env.HUBOT_DISCOVERY_STORAGE || join(process.cwd(), 'data')
     this.heartbeatTimeoutMs = parseInt(process.env.HUBOT_DISCOVERY_TIMEOUT || 30000)
     this.discoveryUrl = process.env.HUBOT_DISCOVERY_URL
     
@@ -77,6 +78,7 @@ export class ServiceDiscovery {
           this.cleanupPendingResponses()
         }, 30000) // Clean up every 30 seconds
       } else {
+        console.log('starting and registering with discovery')
         await this.registerWithDiscovery()
         this.startHeartbeat()
       }
@@ -278,9 +280,10 @@ export class ServiceDiscovery {
       ws.on('message', (data) => {
         try {
           const response = JSON.parse(data.toString())
+          console.log('message from load balancer/service discovery service:', response)
           if (response.success) {
             this.isRegistered = true
-            this.robot.logger.info(`Registered with service discovery as ${this.instanceId}`)
+            this.robot.logger.info(`Received message from service discovery as ${this.instanceId}`)
           } else {
             this.robot.logger.error('Registration failed:', response.error)
           }
@@ -320,7 +323,6 @@ export class ServiceDiscovery {
     try {
       // Get healthy instances from registry
       const healthyInstances = this.registry.getHealthyInstances(this.serviceName)
-      
       // Select an instance using load balancer
       const selectedInstance = this.loadBalancer.selectInstance(healthyInstances)
       
@@ -428,7 +430,7 @@ export class ServiceDiscovery {
       const user = this.robot.brain.userForId(messageData.user.id, messageData.user)
       
       // Create a Hubot TextMessage
-      const message = new this.robot.TextMessage(
+      const message = new TextMessage(
         user,
         messageData.text,
         messageData.id || messageData.messageId || `msg-${Date.now()}`
@@ -630,16 +632,14 @@ export class ServiceDiscovery {
       // Command to test message routing
       this.robot.respond(/test\s+routing(?:\s+(.+))?/i, async (res) => {
         const testMessage = res.match[1] || 'Test message'
-        
-        const messageData = {
-          user: { id: 'test-user', name: 'Test User' },
-          text: testMessage,
-          room: res.message.room || 'general',
-          id: `test-${Date.now()}`
-        }
-        
-        const result = await this.routeMessage(messageData)
-        
+        const message = new TextMessage(
+          { id: 'test-user', name: 'Test User', room: res.message.room },
+          `@${this.robot.name} ${testMessage}`,
+          `test-${Date.now()}`
+        )
+
+        const result = await this.routeMessage(message)
+
         if (result.success) {
           await res.reply(`✅ Test message routed to: ${result.routedTo}`)
         } else {
@@ -663,19 +663,17 @@ export class ServiceDiscovery {
     }
     
     // Deregister from discovery
-    if (this.discoveryWs && this.isRegistered) {
-      try {
-        const deregisterMessage = {
-          type: 'deregister',
-          data: {
-            serviceName: this.serviceName,
-            instanceId: this.instanceId
-          }
+    try {
+      const deregisterMessage = {
+        type: 'deregister',
+        data: {
+          serviceName: this.serviceName,
+          instanceId: this.instanceId
         }
-        this.discoveryWs.send(JSON.stringify(deregisterMessage))
-      } catch (error) {
-        this.robot.logger.debug('Error sending deregister message:', error)
       }
+      this.discoveryWs.send(JSON.stringify(deregisterMessage))
+    } catch (error) {
+      this.robot.logger.debug('Error sending deregister message:', error)
     }
     
     // Close discovery WebSocket

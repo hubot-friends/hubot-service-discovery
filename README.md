@@ -30,7 +30,7 @@ The script can operate in two modes:
 ### Service Discovery Server Configuration
 
 - `HUBOT_DISCOVERY_PORT` - Port for the discovery server (default: 3100)
-- `HUBOT_DISCOVERY_STORAGE` - Storage directory for event store (default: ./discovery-data)
+- `HUBOT_DISCOVERY_STORAGE` - Storage directory for event store (default: ./data)
 - `HUBOT_DISCOVERY_TIMEOUT` - Heartbeat timeout in ms (default: 30000)
 - `HUBOT_LB_STRATEGY` - Load balancing strategy: round-robin, random, least-connections (default: round-robin)
 
@@ -294,7 +294,7 @@ spec:
       volumes:
       - name: data-volume
         persistentVolumeClaim:
-          claimName: discovery-data-pvc
+          claimName: data-pvc
 ---
 apiVersion: v1
 kind: Service
@@ -312,7 +312,7 @@ spec:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: discovery-data-pvc
+  name: data-pvc
 spec:
   accessModes:
     - ReadWriteOnce
@@ -539,7 +539,7 @@ services:
       - HUBOT_LOG_LEVEL=debug
     command: npm start
     volumes:
-      - discovery-data:/app/discovery-data
+      - data:/app/data
 
   # Additional Hubot instances
   hubot-worker-1:
@@ -575,7 +575,7 @@ services:
       - hubot-discovery
 
 volumes:
-  discovery-data:
+  data:
 ```
 
 ## Kubernetes Example
@@ -621,8 +621,8 @@ spec:
         - name: HUBOT_PORT
           value: "8080"
         volumeMounts:
-        - name: discovery-data
-          mountPath: /app/discovery-data
+        - name: data
+          mountPath: /app/data
         livenessProbe:
           tcpSocket:
             port: 3100
@@ -634,9 +634,9 @@ spec:
           initialDelaySeconds: 5
           periodSeconds: 10
       volumes:
-      - name: discovery-data
+      - name: data
         persistentVolumeClaim:
-          claimName: discovery-data-pvc
+          claimName: data-pvc
 
 ---
 apiVersion: v1
@@ -701,7 +701,7 @@ spec:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: discovery-data-pvc
+  name: data-pvc
 spec:
   accessModes:
     - ReadWriteOnce

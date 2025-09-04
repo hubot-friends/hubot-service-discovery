@@ -34,7 +34,7 @@ Add to your `external-scripts.json`:
 ```bash
 # Service Discovery Server Configuration
 HUBOT_DISCOVERY_PORT=3100                    # Port for service discovery server
-HUBOT_DISCOVERY_STORAGE=./discovery-data     # Storage directory for event store
+HUBOT_DISCOVERY_STORAGE=./data     # Storage directory for event store
 HUBOT_DISCOVERY_TIMEOUT=30000               # Heartbeat timeout in ms
 
 # Instance Configuration  

@@ -15,7 +15,7 @@
     "test:watch": "node --test --watch --test-timeout=10000 test/**/*.test.mjs",
     "test:coverage": "node --test --experimental-test-coverage --test-timeout=10000 test/**/*.test.mjs",
     "start": "HUBOT_LOG_LEVEL=debug hubot",
-    "start-client": "HUBOT_LOG_LEVEL=debug HUBOT_DISCOVERY_URL='ws://localhost:3100' HUBOT_SERVICE_NAME=hubot HUBOT_INSTANCE_ID=client-1 hubot -a ../../../index.mjs"
+    "start-client": "HUBOT_LOG_LEVEL=debug HUBOT_DISCOVERY_URL='ws://localhost:3100' HUBOT_SERVICE_NAME=hubot HUBOT_INSTANCE_ID=client-1 hubot -a ../../../index.mjs -r ../../../client-scripts -n Hubot"
   },
   "keywords": [
     "hubot",

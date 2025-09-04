@@ -1,4 +1,4 @@
-import { Adapter } from 'hubot'
+import { Adapter, TextMessage } from 'hubot'
 import ServiceDiscoveryClient from './lib/client.mjs'
 
 export default class ServiceDiscoveryAdapter extends Adapter {
@@ -59,9 +59,9 @@ export default class ServiceDiscoveryAdapter extends Adapter {
       this.robot.logger.error('Service discovery adapter error:', error)
     })
 
-    this.client.on('message', (messageData) => {
+    this.client.on('message', async (messageData) => {
       // Convert service discovery message to Hubot message format
-      this.handleIncomingMessage(messageData)
+      await this.handleIncomingMessage(messageData)
     })
   }
 
@@ -82,34 +82,17 @@ export default class ServiceDiscoveryAdapter extends Adapter {
       // The 'connected' event is emitted by the client when connection is established
     } catch (error) {
       this.robot.logger.error('Failed to start service discovery adapter:', error)
-      throw error
     }
   }
 
-  handleIncomingMessage(messageData) {
+  async handleIncomingMessage(messageData) {
     try {
-      // Create a Hubot User object
-      const user = this.robot.brain.userForId(messageData.user.id, messageData.user)
-      
-      // Create a Hubot TextMessage
-      const message = new this.robot.TextMessage(
-        user,
+      const message = new TextMessage(
+        { id: messageData.user.id, name: messageData.user.name || 'Unknown', room: messageData.room || 'general' },
         messageData.text,
-        messageData.id || messageData.messageId || `msg-${Date.now()}`
+        messageData.id
       )
-      
-      // Set the room if provided
-      if (messageData.room) {
-        message.room = messageData.room
-      }
-      
-      // Store messageId in the message for response tracking
-      if (messageData.messageId) {
-        message.messageId = messageData.messageId
-      }
-      
-      // Receive the message into Hubot
-      this.robot.receive(message)
+      await this.robot.receive(message)
     } catch (error) {
       this.robot.logger.error('Error handling incoming message:', error)
     }

@@ -74,7 +74,7 @@ describe('ServiceDiscovery Load Balancing Integration', () => {
 
   beforeEach(async () => {
     // Create temporary directory for test data
-    testDataDir = path.join(__dirname, '..', 'test-discovery-data')
+    testDataDir = path.join(__dirname, '..', 'test-data')
     await fs.mkdir(testDataDir, { recursive: true })
 
     // Clean up any existing data files to ensure fresh state

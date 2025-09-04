@@ -52,8 +52,8 @@ export class ServiceRegistry extends EventEmitter {
   }
 
   async register(serviceName, instanceData) {
-    const { instanceId, host, port, metadata = {} } = instanceData
-    
+    const { instanceId, host, port, isServer, metadata = {} } = instanceData
+
     if (!serviceName || !instanceId || !host || !port) {
       throw new Error('Missing required fields: serviceName, instanceId, host, port')
     }
@@ -62,6 +62,7 @@ export class ServiceRegistry extends EventEmitter {
       type: 'SERVICE_REGISTERED',
       serviceName,
       instanceId,
+      isServer,
       host,
       port,
       metadata
@@ -135,6 +136,7 @@ export class ServiceRegistry extends EventEmitter {
         host: instance.host,
         port: instance.port,
         url: `ws://${instance.host}:${instance.port}`,
+        isServer: instance.isServer,
         metadata: instance.metadata || {},
         lastSeen: this.instanceHeartbeats.get(instance.instanceId)
       }))
@@ -168,6 +170,7 @@ export class ServiceRegistry extends EventEmitter {
         host: instance.host,
         port: instance.port,
         url: `ws://${instance.host}:${instance.port}`,
+        isServer: instance.isServer,
         metadata: instance.metadata || {},
         lastSeen: this.instanceHeartbeats.get(instance.instanceId),
         // Spread metadata fields to top-level for compatibility
@@ -226,7 +229,7 @@ export class ServiceRegistry extends EventEmitter {
   }
 
   applyServiceRegistered(event) {
-    const { serviceName, instanceId, host, port, metadata } = event
+    const { serviceName, instanceId, host, port, isServer, metadata } = event
     
     if (!this.services.has(serviceName)) {
       this.services.set(serviceName, new Map())
@@ -236,7 +239,7 @@ export class ServiceRegistry extends EventEmitter {
       instanceId,
       host,
       port,
-      ...metadata, // Spread metadata fields to top level for easier access
+      isServer,
       metadata,
       registeredAt: event.timestamp
     })
@@ -312,8 +315,6 @@ export class ServiceRegistry extends EventEmitter {
     }
 
     for await (const { serviceName, instanceId } of expiredInstances) {
-      console.log(`Cleaning up expired instance: ${serviceName}/${instanceId}`)
-      
       const event = {
         type: 'INSTANCE_EXPIRED',
         serviceName,

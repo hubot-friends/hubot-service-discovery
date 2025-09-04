@@ -178,7 +178,7 @@ describe('ServiceDiscoveryAdapter', () => {
     await adapter.run()
     
     const messageData = {
-      user: { id: 'user1', name: 'Test User' },
+      user: { id: 'user1', name: 'Test User', room: 'general' },
       text: 'Hello from service discovery',
       room: 'general',
       id: 'msg-123'

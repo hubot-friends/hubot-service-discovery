@@ -231,6 +231,10 @@ describe('ServiceRegistry', () => {
     })
 
     const instances = registry.discover('multi-instance-service')
+    await registry.heartbeat('instance-1')
+    await registry.heartbeat('instance-2')
+    await registry.heartbeat('instance-3')
+
     assert.strictEqual(instances.instances.length, 3)
 
     const instanceIds = instances.instances.map(i => i.instanceId).sort()
