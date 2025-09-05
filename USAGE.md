@@ -126,7 +126,6 @@ When using the script (server mode), these commands are available in chat:
 - `hubot discover services` - Show all registered services
 - `hubot discover hubots` - Show all registered Hubot instances  
 - `hubot discovery status` - Show service discovery status
-- `hubot connect to <host>:<port>` - Connect brain to a peer
 - `hubot brain peers` - Show brain peer connections
 
 ## How Messages Flow

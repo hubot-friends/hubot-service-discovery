@@ -18,8 +18,6 @@
 // Commands:
 //   hubot discover services - Show all registered services
 //   hubot discovery status - Show service discovery status
-//   hubot connect to <host>:<port> - Connect brain to a peer
-//   hubot brain peers - Show brain peer connections
 //   hubot load balancer status - Show load balancer statistics (server only)
 //   hubot lb strategy <strategy> - Change load balancing strategy (server only)
 //   hubot lb reset - Reset round-robin counter (server only)
@@ -240,7 +238,6 @@ export class ServiceDiscovery {
         return await this.routeMessage(message.data)
         
       case 'message_response':
-        console.log('message_response', message)
         // This is a response from a client instance back to the chat provider
         return this.handleMessageResponse(message.data)
         
@@ -370,7 +367,7 @@ export class ServiceDiscovery {
         type: 'message',
         data: messageData
       }
-      console.log('routing message to instance', routedMessage)
+
       clientWs.send(JSON.stringify(routedMessage))
       
       this.robot.logger.debug(`Message routed to instance: ${selectedInstance.instanceId}`)
@@ -392,7 +389,6 @@ export class ServiceDiscovery {
   }
 
   handleMessageResponse(responseData) {
-    console.log('handler response', responseData)
     const messageId = responseData.messageId
     
     if (!messageId) {
@@ -542,33 +538,6 @@ export class ServiceDiscovery {
       await res.reply(`🔍 Service Discovery Status:\n${status.join('\n')}`)
     })
 
-    // Command to connect to a peer (for brain sync)
-    this.robot.respond(/connect\s+to\s+(\S+):?(\d+)?/i, async (res) => {
-      const host = res.match[1]
-      const port = res.match[2] || 3001
-      
-      if (this.robot.brain && typeof this.robot.brain.connectToPeer === 'function') {
-        try {
-          await this.robot.brain.connectToPeer(host, port)
-          await res.reply(`🔗 Attempting to connect brain to ${host}:${port}`)
-        } catch (error) {
-          await res.reply(`❌ Failed to connect to peer: ${error.message}`)
-        }
-      } else {
-        await res.reply('❌ Brain does not support peer connections')
-      }
-    })
-
-    // Command to show brain peer status
-    this.robot.respond(/brain\s+peers/i, async (res) => {
-      if (this.robot.brain && typeof this.robot.brain.getPeerCount === 'function') {
-        const peerCount = this.robot.brain.getPeerCount()
-        await res.reply(`🧠 Brain has ${peerCount} connected peer(s)`)
-      } else {
-        await res.reply('❌ Brain peer information not available')
-      }
-    })
-
     // Load balancing commands (only available on server instances)
     if (this.isServer && this.loadBalancer) {
       // Command to show load balancer status
@@ -631,6 +600,24 @@ export class ServiceDiscovery {
           await res.reply(`❌ Failed to route test message: ${result.error}`)
         }
       })
+
+      this.robot.receiveMiddleware(async context => {
+        if (!Array.from([/help/
+          , /test\s+routing/
+          , /(?:load.?balancer|lb)\s+reset/
+          , /(?:load.?balancer|lb)\s+strategy\s+(\w+)/
+          , /(?:load.?balancer|lb)\s+status/i
+        ]).some(matcher => {
+          return matcher.test(context.response.message.text)
+        })) {
+          this.robot.logger.debug('Routing message')
+          const result = await this.routeMessage(context.response.message)
+          return false
+        }
+
+        return true
+      })
+      
     }
   }
 

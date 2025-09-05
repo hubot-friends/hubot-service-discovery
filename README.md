@@ -115,12 +115,6 @@ hubot discover hubots
 # Check discovery status
 hubot discovery status
 
-# Connect brain to a peer (if supported)
-hubot connect to hostname:port
-
-# Check brain peer connections
-hubot brain peers
-
 # Load balancing commands (server instance only)
 hubot load balancer status    # Show load balancer statistics
 hubot lb strategy round-robin # Change to round-robin strategy
