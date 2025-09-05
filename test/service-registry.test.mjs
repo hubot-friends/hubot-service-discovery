@@ -8,9 +8,11 @@ describe('ServiceRegistry', () => {
   let registry
   let testDir
 
-  beforeEach(() => {
-    testDir = join(process.cwd(), 'test-data', `registry-test-${Date.now()}`)
-    mkdirSync(testDir, { recursive: true })
+  beforeEach(async () => {
+    const timestamp = Date.now()
+    const random = Math.floor(Math.random() * 10000)
+    testDir = join(process.cwd(), 'test-data', `registry-test-${timestamp}-${random}`)
+    // Don't create the directory here - let EventStore.initialize() handle it
     
     registry = new ServiceRegistry({
       eventStore: {
@@ -18,10 +20,27 @@ describe('ServiceRegistry', () => {
       },
       heartbeatTimeout: 1000 // 1 second for testing
     })
+    registry.on('error', (error) => {
+      console.error('ServiceRegistry error:', error)
+    })
+    
+    // Initialize the registry to ensure EventStore is ready
+    await registry.initialize()
   })
 
   afterEach(async () => {
-    await registry.close()
+    try {
+      // Only close if registry is still active
+      if (registry && !registry.closed) {
+        await registry.close()
+      }
+    } catch (error) {
+      // Ignore close errors during cleanup
+    }
+    
+    // Wait a moment for any async cleanup to complete
+    await new Promise(resolve => setTimeout(resolve, 50))
+    
     if (existsSync(testDir)) {
       rmSync(testDir, { recursive: true, force: true })
     }
@@ -209,6 +228,9 @@ describe('ServiceRegistry', () => {
     assert.deepStrictEqual(instances.instances[0].metadata, { persistent: true })
 
     await newRegistry.close()
+    
+    // Update registry reference so afterEach doesn't try to close the old one
+    registry = newRegistry
   })
 
   test('should handle multiple instances of same service', async () => {

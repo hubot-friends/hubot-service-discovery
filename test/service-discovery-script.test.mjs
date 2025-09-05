@@ -3,7 +3,7 @@ import assert from 'node:assert'
 import { EventEmitter } from 'events'
 import { existsSync, rmSync, mkdirSync } from 'fs'
 import { join } from 'path'
-import serviceDiscoveryScript from '../service-discovery.mjs'
+import serviceDiscoveryScript from '../scripts/service-discovery.mjs'
 
 // Mock robot for testing
 class MockRobot extends EventEmitter {
@@ -66,8 +66,10 @@ describe('ServiceDiscovery Script', () => {
     // Save original environment
     originalEnv = { ...process.env }
     
-    // Setup test environment
-    testDir = join(process.cwd(), 'test-data', `script-test-${Date.now()}`)
+    // Setup test environment with more unique directory naming
+    const timestamp = Date.now()
+    const random = Math.floor(Math.random() * 10000)
+    testDir = join(process.cwd(), 'test-data', `script-test-${timestamp}-${random}`)
     mkdirSync(testDir, { recursive: true })
     
     process.env.HUBOT_DISCOVERY_STORAGE = testDir
@@ -96,8 +98,7 @@ describe('ServiceDiscovery Script', () => {
   })
 
   test('should initialize service discovery script', async () => {
-    await await serviceDiscoveryScript(robot)
-    
+    await serviceDiscoveryScript(robot)
     assert(robot.serviceDiscovery, 'Should attach serviceDiscovery to robot')
     assert.strictEqual(robot.serviceDiscovery.instanceId, 'test-instance')
     assert.strictEqual(robot.serviceDiscovery.serviceName, 'hubot')

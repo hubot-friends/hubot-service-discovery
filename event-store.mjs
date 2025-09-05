@@ -14,17 +14,49 @@ export class EventStore extends EventEmitter {
     this.eventCount = 0
     this.lastSnapshotTime = Date.now()
     this.initialized = false
+    this.initializing = false
   }
 
   async initialize() {
-    if (this.initialized) return
+    if (this.initialized) {
+      return
+    }
+    
+    if (this.initializing) {
+      // Wait for the current initialization to complete
+      while (this.initializing) {
+        await new Promise(resolve => setTimeout(resolve, 10))
+      }
+      return
+    }
+    
+    this.initializing = true
     
     try {
-      await mkdir(this.storageDir, { recursive: true })
+      // Retry directory creation to handle concurrent filesystem operations
+      let attempts = 0
+      const maxAttempts = 3
+      
+      while (attempts < maxAttempts) {
+        try {
+          await mkdir(this.storageDir, { recursive: true })
+          break
+        } catch (error) {
+          attempts++
+          if (attempts >= maxAttempts) {
+            throw error
+          }
+          // Wait a bit before retrying to avoid race conditions
+          await new Promise(resolve => setTimeout(resolve, 50 + Math.random() * 50))
+        }
+      }
+      
       this.initialized = true
     } catch (error) {
       console.error('Error initializing event store:', error)
       throw error
+    } finally {
+      this.initializing = false
     }
   }
 
@@ -60,6 +92,21 @@ export class EventStore extends EventEmitter {
       
       return eventWithTimestamp
     } catch (error) {
+      // If file operation fails due to directory being deleted, try to re-initialize
+      if (error.code === 'ENOENT') {
+        try {
+          this.initialized = false // Reset initialization flag
+          await this.initialize()
+          await writeFile(this.currentEventLog, eventLine, { flag: 'a' })
+          this.eventCount++
+          this.emit('event', eventWithTimestamp)
+          await this.checkSnapshotConditions()
+          return eventWithTimestamp
+        } catch (retryError) {
+          this.emit('error', retryError)
+          throw retryError
+        }
+      }
       this.emit('error', error)
       throw error
     }
@@ -180,6 +227,39 @@ export class EventStore extends EventEmitter {
       this.emit('snapshot-created', { snapshot, archiveFile })
       
     } catch (error) {
+      // If snapshot fails due to directory being deleted, try to re-initialize
+      if (error.code === 'ENOENT') {
+        try {
+          this.initialized = false // Reset initialization flag
+          await this.initialize()
+          
+          const snapshot = {
+            timestamp: Date.now(),
+            events: [], // We don't store events in snapshot, just the current state
+            state: currentState
+          }
+
+          await writeFile(this.snapshotFile, JSON.stringify(snapshot, null, 2))
+          
+          // Archive current event log and start fresh
+          const archiveFile = join(this.storageDir, `events-${Date.now()}.ndjson`)
+          if (await this.#doesExist(this.currentEventLog)) {
+            const eventData = await readFile(this.currentEventLog, 'utf-8')
+            await writeFile(archiveFile, eventData)
+            await writeFile(this.currentEventLog, '') // Clear current log
+          }
+
+          this.eventCount = 0
+          this.lastSnapshotTime = Date.now()
+          
+          this.emit('snapshot-created', { snapshot, archiveFile })
+          return // Successfully completed after retry
+        } catch (retryError) {
+          this.emit('error', retryError)
+          console.error('Error creating snapshot after retry:', retryError)
+          return
+        }
+      }
       this.emit('error', error)
       console.error('Error creating snapshot:', error)
     }

@@ -28,9 +28,9 @@
 // Author:
 //   Joey Guerra
 
-import EventStore from './event-store.mjs'
-import ServiceRegistry from './service-registry.mjs'
-import LoadBalancer from './lib/load-balancer.mjs'
+import EventStore from '../event-store.mjs'
+import ServiceRegistry from '../service-registry.mjs'
+import LoadBalancer from '../lib/load-balancer.mjs'
 import { WebSocketServer } from 'ws'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
@@ -78,7 +78,6 @@ export class ServiceDiscovery {
           this.cleanupPendingResponses()
         }, 30000) // Clean up every 30 seconds
       } else {
-        console.log('starting and registering with discovery')
         await this.registerWithDiscovery()
         this.startHeartbeat()
       }
@@ -250,6 +249,7 @@ export class ServiceDiscovery {
   }
 
   async registerWithDiscovery() {
+    console.log('register with discovery')
     try {
       const wsUrl = this.discoveryUrl.replace('http', 'ws')
       const ws = new (await import('ws')).default(wsUrl)
@@ -280,9 +280,9 @@ export class ServiceDiscovery {
       ws.on('message', (data) => {
         try {
           const response = JSON.parse(data.toString())
-          console.log('message from load balancer/service discovery service:', response)
           if (response.success) {
             this.isRegistered = true
+            console.log(response)
             this.robot.logger.info(`Received message from service discovery as ${this.instanceId}`)
           } else {
             this.robot.logger.error('Registration failed:', response.error)

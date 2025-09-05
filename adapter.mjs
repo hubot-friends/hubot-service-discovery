@@ -81,7 +81,7 @@ export default class ServiceDiscoveryAdapter extends Adapter {
       
       // The 'connected' event is emitted by the client when connection is established
     } catch (error) {
-      this.robot.logger.error('Failed to start service discovery adapter:', error)
+      this.robot.logger.error(`Failed to start service discovery adapter: ${JSON.stringify(error)}`)
     }
   }
 
@@ -123,6 +123,7 @@ export default class ServiceDiscoveryAdapter extends Adapter {
 
   async reply(envelope, ...strings) {
     // For replies, we might want to mention the user
+    console.log('replying', envelope, strings)
     const mention = envelope.user.mention_name || envelope.user.name || envelope.user.id
     const replies = strings.map(str => `@${mention}: ${str}`)
     await this.send(envelope, ...replies)

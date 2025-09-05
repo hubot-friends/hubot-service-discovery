@@ -89,7 +89,7 @@ describe('ServiceDiscovery Load Balancing Integration', () => {
     mockRobot.parseHelp = mock.fn() // Add missing parseHelp method
     
     // Import and create ServiceDiscovery, but stop it first to clean up any auto-started services
-    const serviceDiscoveryFunction = (await import('../service-discovery.mjs')).default
+    const serviceDiscoveryFunction = (await import('../scripts/service-discovery.mjs')).default
     serviceDiscovery = await serviceDiscoveryFunction(mockRobot)
     
     // Stop the auto-started service discovery to clean up timers/servers

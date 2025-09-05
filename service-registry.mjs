@@ -9,6 +9,7 @@ export class ServiceRegistry extends EventEmitter {
     this.instanceHeartbeats = new Map() // instanceId -> timestamp
     this.heartbeatTimeout = options.heartbeatTimeout || 60000 // 1 minute
     this.cleanupInterval = options.cleanupInterval || 30000 // 30 seconds
+    this.closed = false
     
     this.setupEventHandlers()
     this.startCleanupTimer()
@@ -355,12 +356,15 @@ export class ServiceRegistry extends EventEmitter {
   }
 
   async close() {
+    if (this.closed) return // Already closed
+    
     if (this.cleanupTimer) {
       clearInterval(this.cleanupTimer)
     }
     
     // Create final snapshot
     await this.createSnapshot()
+    this.closed = true
   }
 }
 
