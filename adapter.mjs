@@ -42,6 +42,13 @@ export default class ServiceDiscoveryAdapter extends Adapter {
   setupEventHandlers() {
     this.client.on('connected', () => {
       this.robot.logger.info(`Service discovery adapter connected to ${this.discoveryUrl}`)
+      if(!this.client.registered) {
+        this.client.register(this.host, this.port, {
+          adapter: 'service-discovery',
+          version: process.env.npm_package_version || '1.0.0',
+          capabilities: ['chat', 'commands']
+        })
+      }
       this.emit('connected')
     })
 
@@ -69,14 +76,7 @@ export default class ServiceDiscoveryAdapter extends Adapter {
     try {
       // Connect to service discovery
       await this.client.connect()
-      
-      // Register this instance
-      await this.client.register(this.host, this.port, {
-        adapter: 'service-discovery',
-        version: process.env.npm_package_version || '1.0.0',
-        capabilities: ['chat', 'commands']
-      })
-      
+
       this.robot.logger.info(`Service discovery adapter registered as ${this.instanceId}`)
       
       // The 'connected' event is emitted by the client when connection is established
@@ -86,12 +86,14 @@ export default class ServiceDiscoveryAdapter extends Adapter {
   }
 
   async handleIncomingMessage(messageData) {
+    console.log('handling incoming message in adapter', messageData)
     try {
       const message = new TextMessage(
         { id: messageData.user.id, name: messageData.user.name || 'Unknown', room: messageData.room || 'general' },
         messageData.text,
         messageData.id
       )
+      message.messageId = messageData.messageId
       await this.robot.receive(message)
     } catch (error) {
       this.robot.logger.error('Error handling incoming message:', error)
@@ -99,6 +101,7 @@ export default class ServiceDiscoveryAdapter extends Adapter {
   }
 
   async send(envelope, ...strings) {
+    console.log('sending', envelope)
     try {
       for (const str of strings) {
         const messageData = {
@@ -108,7 +111,8 @@ export default class ServiceDiscoveryAdapter extends Adapter {
           text: str,
           timestamp: Date.now(),
           sourceInstance: this.instanceId,
-          messageId: envelope.messageId // Include messageId for response tracking
+          id: envelope.message.id,
+          messageId: envelope.message.messageId
         }
         
         await this.client.sendMessage({

@@ -430,7 +430,7 @@ describe('ServiceDiscoveryClient Reconnection', () => {
       // Simulate server disconnect and reconnect
       client.ws.simulateServerDisconnect()
       await waitForEvent(client, 'disconnected')
-      await waitForEvent(client, 'connected')
+      await waitForEvent(client, 'connected', 2000) // Longer timeout for reconnection
 
       // After reconnection, should not automatically re-register
       // (This is expected behavior - the adapter would handle re-registration)

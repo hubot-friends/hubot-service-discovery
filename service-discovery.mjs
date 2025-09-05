@@ -28,9 +28,10 @@
 // Author:
 //   Joey Guerra
 
-import EventStore from '../event-store.mjs'
-import ServiceRegistry from '../service-registry.mjs'
-import LoadBalancer from '../lib/load-balancer.mjs'
+import EventStore from './event-store.mjs'
+import ServiceRegistry from './service-registry.mjs'
+import LoadBalancer from './lib/load-balancer.mjs'
+import ServiceDiscoveryClient from './lib/client.mjs'
 import { WebSocketServer } from 'ws'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
@@ -57,7 +58,7 @@ export class ServiceDiscovery {
     // State
     this.registry = null
     this.wss = null
-    this.discoveryWs = null
+    this.discoveryClient = null // Use ServiceDiscoveryClient for client connections
     this.heartbeatTimer = null
     this.isRegistered = false
     this.isServer = !this.discoveryUrl // If no discovery URL provided, act as server
@@ -79,7 +80,6 @@ export class ServiceDiscovery {
         }, 30000) // Clean up every 30 seconds
       } else {
         await this.registerWithDiscovery()
-        this.startHeartbeat()
       }
       
       this.registerCommands()
@@ -240,6 +240,7 @@ export class ServiceDiscovery {
         return await this.routeMessage(message.data)
         
       case 'message_response':
+        console.log('message_response', message)
         // This is a response from a client instance back to the chat provider
         return this.handleMessageResponse(message.data)
         
@@ -249,74 +250,82 @@ export class ServiceDiscovery {
   }
 
   async registerWithDiscovery() {
-    console.log('register with discovery')
     try {
-      const wsUrl = this.discoveryUrl.replace('http', 'ws')
-      const ws = new (await import('ws')).default(wsUrl)
-      
-      ws.on('open', async () => {
-        this.robot.logger.info(`Connected to service discovery at ${wsUrl}`)
-        
-        const registrationMessage = {
-          type: 'register',
-          data: {
-            serviceName: this.serviceName,
-            instanceId: this.instanceId,
-            host: this.host,
-            port: this.port,
-            isServer: this.isServer,
-            metadata: {
-              adapter: this.robot.adapterName,
-              brain: this.robot.brain?.constructor?.name || 'unknown',
-              version: this.robot.version || '1.0.0',
-              name: this.robot.name
-            }
-          }
+      // Initialize the ServiceDiscoveryClient with auto-reconnection
+      this.discoveryClient = new ServiceDiscoveryClient(
+        this.discoveryUrl,
+        this.serviceName,
+        this.instanceId,
+        {
+          host: this.host,
+          port: this.port,
+          heartbeatInterval: this.heartbeatInterval,
+          metadata: {
+            adapter: this.robot.adapterName,
+            brain: this.robot.brain?.constructor?.name || 'unknown',
+            version: this.robot.version || '1.0.0',
+            name: this.robot.name,
+            isServer: this.isServer
+          },
+          autoReconnect: true,
+          reconnectInterval: parseInt(process.env.HUBOT_DISCOVERY_RECONNECT_INTERVAL || 5000),
+          maxReconnectAttempts: parseInt(process.env.HUBOT_DISCOVERY_MAX_RECONNECT_ATTEMPTS || 0) // 0 = infinite
         }
-        
-        ws.send(JSON.stringify(registrationMessage))
+      )
+
+      // Set up event handlers
+      this.discoveryClient.on('connected', () => {
+        this.robot.logger.info(`Connected to service discovery at ${this.discoveryUrl}`)
+        // Register immediately upon connection (including reconnections)
+        this.registerInstance()
       })
-      
-      ws.on('message', (data) => {
-        try {
-          const response = JSON.parse(data.toString())
-          if (response.success) {
-            this.isRegistered = true
-            console.log(response)
-            this.robot.logger.info(`Received message from service discovery as ${this.instanceId}`)
-          } else {
-            this.robot.logger.error('Registration failed:', response.error)
-          }
-        } catch (error) {
-          this.robot.logger.error('Error parsing registration response:', error)
-        }
+
+      this.discoveryClient.on('disconnected', (info) => {
+        this.isRegistered = false
+        this.robot.logger.warn(`Disconnected from service discovery: ${info.reason} (code: ${info.code})`)
       })
-      
-      ws.on('error', (error) => {
-        this.robot.logger.error('Discovery connection error:', error)
+
+      this.discoveryClient.on('reconnecting', (info) => {
+        this.robot.logger.info(`Reconnecting to service discovery (attempt ${info.attempt}/${info.maxAttempts || '∞'}) in ${info.interval}ms`)
       })
-      
-      this.discoveryWs = ws
+
+      this.discoveryClient.on('error', (error) => {
+        this.robot.logger.error('Discovery client error:', error.message)
+      })
+
+      // Handle incoming messages from the discovery server (e.g., chat messages to route)
+      this.discoveryClient.on('message', async (messageData) => {
+        await this.processMessageLocally(messageData)
+      })
+
+      // Connect to the discovery server
+      await this.discoveryClient.connect()
       
     } catch (error) {
       this.robot.logger.error('Failed to connect to service discovery:', error)
+      throw error
     }
   }
 
-  startHeartbeat() {    
-    this.heartbeatTimer = setInterval(() => {
-      if (this.discoveryWs && this.discoveryWs.readyState === 1) { // WebSocket.OPEN
-        const heartbeatMessage = {
-          type: 'heartbeat',
-          data: {
-            serviceName: this.serviceName,
-            instanceId: this.instanceId
-          }
-        }
-        
-        this.discoveryWs.send(JSON.stringify(heartbeatMessage))
-      }
-    }, this.heartbeatInterval)
+  async registerInstance() {
+    if (!this.discoveryClient || !this.discoveryClient.connected) {
+      return
+    }
+
+    try {
+      await this.discoveryClient.register(this.host, this.port, {
+        adapter: this.robot.adapterName,
+        brain: this.robot.brain?.constructor?.name || 'unknown',
+        version: this.robot.version || '1.0.0',
+        name: this.robot.name,
+        isServer: this.isServer
+      })
+      
+      this.isRegistered = true
+      this.robot.logger.info(`Successfully registered instance ${this.instanceId} with service discovery`)
+    } catch (error) {
+      this.robot.logger.error('Failed to register with service discovery:', error)
+    }
   }
 
   async routeMessage(messageData) {
@@ -325,7 +334,6 @@ export class ServiceDiscovery {
       const healthyInstances = this.registry.getHealthyInstances(this.serviceName)
       // Select an instance using load balancer
       const selectedInstance = this.loadBalancer.selectInstance(healthyInstances)
-      
       if (!selectedInstance) {
         this.robot.logger.warn('No healthy instances available for message routing')
         return { 
@@ -337,7 +345,6 @@ export class ServiceDiscovery {
 
       // Get the client connection for the selected instance
       const clientWs = this.connectedClients.get(selectedInstance.instanceId)
-      
       if (!clientWs || clientWs.readyState !== 1) { // 1 = WebSocket.OPEN
         this.robot.logger.warn(`Client connection not available for instance: ${selectedInstance.instanceId}`)
         return { 
@@ -363,7 +370,7 @@ export class ServiceDiscovery {
         type: 'message',
         data: messageData
       }
-
+      console.log('routing message to instance', routedMessage)
       clientWs.send(JSON.stringify(routedMessage))
       
       this.robot.logger.debug(`Message routed to instance: ${selectedInstance.instanceId}`)
@@ -385,11 +392,12 @@ export class ServiceDiscovery {
   }
 
   handleMessageResponse(responseData) {
+    console.log('handler response', responseData)
     const messageId = responseData.messageId
     
     if (!messageId) {
       this.robot.logger.warn('Received message response without messageId')
-      return { success: false, error: 'Missing messageId' }
+      return { success: false, error: 'messageId is required for message responses' }
     }
 
     const pendingMessage = this.pendingResponses.get(messageId)
@@ -476,37 +484,15 @@ export class ServiceDiscovery {
       }
     }
     
-    if (!this.discoveryWs || this.discoveryWs.readyState !== 1) {
+    if (!this.discoveryClient || !this.discoveryClient.connected) {
       throw new Error('Not connected to service discovery')
     }
     
-    return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        reject(new Error('Discovery request timeout'))
-      }, 5000)
-      
-      const messageHandler = (data) => {
-        try {
-          const response = JSON.parse(data.toString())
-          if (response.success) {
-            clearTimeout(timeout)
-            this.discoveryWs.removeListener('message', messageHandler)
-            resolve(response.data)
-          }
-        } catch (error) {
-          // Ignore parse errors, might be other messages
-        }
-      }
-      
-      this.discoveryWs.on('message', messageHandler)
-      
-      const discoveryMessage = {
-        type: 'discover',
-        data: { serviceName }
-      }
-      
-      this.discoveryWs.send(JSON.stringify(discoveryMessage))
-    })
+    try {
+      return await this.discoveryClient.discoverServices(serviceName)
+    } catch (error) {
+      throw new Error(`Service discovery failed: ${error.message}`)
+    }
   }
 
   registerCommands() {
@@ -589,14 +575,13 @@ export class ServiceDiscovery {
       this.robot.respond(/(?:load.?balancer|lb)\s+status/i, async (res) => {
         const stats = this.loadBalancer.getStats()
         const allServices = this.registry.discoverAll()
-        
+
         // Calculate total and healthy instances from registry
         const totalInstances = Object.values(allServices).reduce((sum, instances) => sum + instances.length, 0)
         let healthyInstances = 0
         for (const serviceName of Object.keys(allServices)) {
           healthyInstances += this.registry.getHealthyInstances(serviceName).length
         }
-        
         const status = []
         status.push(`Strategy: ${stats.strategy}`)
         status.push(`Connected Clients: ${this.connectedClients.size}`)
@@ -650,7 +635,7 @@ export class ServiceDiscovery {
   }
 
   async stop() {
-    // Clear heartbeat timer
+    // Clear heartbeat timer (if any old references remain)
     if (this.heartbeatTimer) {
       clearInterval(this.heartbeatTimer)
       this.heartbeatTimer = null
@@ -662,24 +647,14 @@ export class ServiceDiscovery {
       this.cleanupTimer = null
     }
     
-    // Deregister from discovery
-    try {
-      const deregisterMessage = {
-        type: 'deregister',
-        data: {
-          serviceName: this.serviceName,
-          instanceId: this.instanceId
-        }
+    // Disconnect discovery client (handles deregistration automatically)
+    if (this.discoveryClient) {
+      try {
+        await this.discoveryClient.disconnect()
+      } catch (error) {
+        this.robot?.logger?.debug('Discovery client disconnect error (continuing cleanup):', error.message)
       }
-      this.discoveryWs.send(JSON.stringify(deregisterMessage))
-    } catch (error) {
-      this.robot.logger.debug('Error sending deregister message:', error)
-    }
-    
-    // Close discovery WebSocket
-    if (this.discoveryWs) {
-      this.discoveryWs.close()
-      this.discoveryWs = null
+      this.discoveryClient = null
     }
     
     // Close discovery server with timeout
@@ -725,6 +700,8 @@ export class ServiceDiscovery {
     this.loadBalancer = null
     this.connectedClients.clear()
     this.pendingResponses.clear()
+    
+    this.isRegistered = false
     
     this.robot.logger.info('Service discovery stopped')
   }

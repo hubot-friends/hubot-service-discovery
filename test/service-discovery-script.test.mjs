@@ -3,7 +3,7 @@ import assert from 'node:assert'
 import { EventEmitter } from 'events'
 import { existsSync, rmSync, mkdirSync } from 'fs'
 import { join } from 'path'
-import serviceDiscoveryScript from '../scripts/service-discovery.mjs'
+import serviceDiscoveryScript from '../service-discovery.mjs'
 
 // Mock robot for testing
 class MockRobot extends EventEmitter {

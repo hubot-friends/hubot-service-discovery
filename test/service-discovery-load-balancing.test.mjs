@@ -89,7 +89,7 @@ describe('ServiceDiscovery Load Balancing Integration', () => {
     mockRobot.parseHelp = mock.fn() // Add missing parseHelp method
     
     // Import and create ServiceDiscovery, but stop it first to clean up any auto-started services
-    const serviceDiscoveryFunction = (await import('../scripts/service-discovery.mjs')).default
+    const serviceDiscoveryFunction = (await import('../service-discovery.mjs')).default
     serviceDiscovery = await serviceDiscoveryFunction(mockRobot)
     
     // Stop the auto-started service discovery to clean up timers/servers
@@ -307,6 +307,27 @@ describe('ServiceDiscovery Load Balancing Integration', () => {
   })
 
   describe('Message Response Handling', () => {
+    test('should require messageId on response data when client replies to message', async () => {
+      // This test verifies that Service Discovery requires a messageId on the responseData
+      // when a client replies to a message - this is CRITICAL for tracking responses
+      
+      const responseData = {
+        text: 'Hello back!',
+        room: 'general',
+        user: { id: 'bot', name: 'Hubot' }
+        // Note: Missing messageId - this should cause failure
+      }
+
+      const result = await serviceDiscovery.handleDiscoveryMessage({
+        type: 'message_response',
+        data: responseData
+      })
+
+      // ASSERTION: Service Discovery must reject responses without messageId
+      assert.strictEqual(result.success, false)
+      assert(result.error.includes('messageId is required'))
+    })
+
     test('should handle message response successfully', async () => {
       const messageId = 'test-msg-123'
       
@@ -346,7 +367,7 @@ describe('ServiceDiscovery Load Balancing Integration', () => {
       const result = serviceDiscovery.handleMessageResponse(responseData)
 
       assert.strictEqual(result.success, false)
-      assert(result.error.includes('Missing messageId'))
+      assert(result.error.includes('messageId is required'))
     })
 
     test('should handle response for unknown messageId', () => {

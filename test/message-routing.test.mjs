@@ -102,7 +102,7 @@ class MessageRouter {
     const messageId = responseData.messageId
     
     if (!messageId) {
-      return { success: false, error: 'Missing messageId' }
+      return { success: false, error: 'messageId is required for message responses' }
     }
 
     const pendingMessage = this.pendingResponses.get(messageId)
@@ -304,7 +304,7 @@ describe('Load Balancing Message Routing', () => {
       const result = messageRouter.handleMessageResponse(responseData)
 
       assert.strictEqual(result.success, false)
-      assert(result.error.includes('Missing messageId'))
+      assert(result.error.includes('messageId is required'))
     })
 
     test('should handle response for unknown messageId', () => {
