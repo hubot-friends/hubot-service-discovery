@@ -102,7 +102,7 @@ describe('ServiceDiscovery Script', () => {
     assert(robot.serviceDiscovery, 'Should attach serviceDiscovery to robot')
     assert.strictEqual(robot.serviceDiscovery.instanceId, 'test-instance')
     assert.strictEqual(robot.serviceDiscovery.serviceName, 'hubot')
-    assert.strictEqual(robot.serviceDiscovery.isServer, true) // No discovery URL, so acts as server
+    assert(robot.serviceDiscovery.registry, 'Should have a registry (always a server)')
   })
 
   test('should register commands', async () => {
@@ -116,9 +116,9 @@ describe('ServiceDiscovery Script', () => {
     assert(patterns.some(p => p.includes('discover')), 'Should register discover command')
     assert(patterns.some(p => p.includes('status')), 'Should register status command')
     
-    // Load balancer commands are only available for server instances
+    // Load balancer commands are always available (ServiceDiscovery is always a server)
     const serviceDiscovery = robot.serviceDiscovery
-    if (serviceDiscovery.isServer && serviceDiscovery.loadBalancer) {
+    if (serviceDiscovery.loadBalancer) {
       assert(patterns.some(p => p.includes('load') || p.includes('lb')), 'Should register load balancer commands')
       assert(patterns.some(p => p.includes('routing')), 'Should register routing test command')
     }
@@ -127,17 +127,16 @@ describe('ServiceDiscovery Script', () => {
   test('should start as server when no discovery URL provided', async () => {
     await serviceDiscoveryScript(robot)
     
-    assert.strictEqual(robot.serviceDiscovery.isServer, true)
-    assert.strictEqual(robot.serviceDiscovery.discoveryUrl, undefined)
+    assert(robot.serviceDiscovery.registry, 'Should have registry (always a server)')
   })
 
-  test('should start as client when discovery URL provided', async () => {
+  test('should always start as server', async () => {
+    // Set discovery URL to test that it's ignored (ServiceDiscovery is always a server)
     process.env.HUBOT_DISCOVERY_URL = 'ws://localhost:3100'
     
     await serviceDiscoveryScript(robot)
     
-    assert.strictEqual(robot.serviceDiscovery.isServer, false)
-    assert.strictEqual(robot.serviceDiscovery.discoveryUrl, 'ws://localhost:3100')
+    assert(robot.serviceDiscovery.registry, 'Should still have registry (always a server)')
   })
 
   test('should handle discovery messages as server', async () => {
@@ -349,7 +348,7 @@ describe('ServiceDiscovery Script', () => {
     
     assert.strictEqual(serviceDiscovery.registry, null)
     assert.strictEqual(serviceDiscovery.wss, null)
-    assert.strictEqual(serviceDiscovery.heartbeatTimer, null)
+    assert.strictEqual(serviceDiscovery.cleanupTimer, null)
   })
 
   test('should handle unknown message types', async () => {

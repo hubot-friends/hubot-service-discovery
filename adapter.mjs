@@ -88,7 +88,6 @@ export default class ServiceDiscoveryAdapter extends Adapter {
   }
 
   async handleIncomingMessage(messageData) {
-    console.log('handling incoming message in adapter', messageData)
     try {
       const message = new TextMessage(
         { id: messageData.user.id, name: messageData.user.name || 'Unknown', room: messageData.room || 'general' },
@@ -103,7 +102,6 @@ export default class ServiceDiscoveryAdapter extends Adapter {
   }
 
   async send(envelope, ...strings) {
-    console.log('sending', envelope)
     try {
       for (const str of strings) {
         const messageData = {
@@ -129,7 +127,6 @@ export default class ServiceDiscoveryAdapter extends Adapter {
 
   async reply(envelope, ...strings) {
     // For replies, we might want to mention the user
-    console.log('replying', envelope, strings)
     const mention = envelope.user.mention_name || envelope.user.name || envelope.user.id
     const replies = strings.map(str => `@${mention}: ${str}`)
     await this.send(envelope, ...replies)

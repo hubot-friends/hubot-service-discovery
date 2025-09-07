@@ -10,18 +10,15 @@
 //   HUBOT_DISCOVERY_PORT - Port for the discovery server (default: 3100)
 //   HUBOT_DISCOVERY_STORAGE - Storage directory for event store (default: ./data)
 //   HUBOT_DISCOVERY_TIMEOUT - Heartbeat timeout in ms (default: 30000)
-//   HUBOT_DISCOVERY_URL - URL of discovery server to connect to (optional, for client-only mode)
-//   HUBOT_DISCOVERY_RECONNECT_INTERVAL - Client reconnection interval in ms (default: 5000)
-//   HUBOT_DISCOVERY_MAX_RECONNECT_ATTEMPTS - Max reconnection attempts, 0 = infinite (default: 0)
 //   HUBOT_LB_STRATEGY - Load balancing strategy: round-robin, random, least-connections (default: round-robin)
 //
 // Commands:
 //   hubot discover services - Show all registered services
 //   hubot discovery status - Show service discovery status
-//   hubot load balancer status - Show load balancer statistics (server only)
-//   hubot lb strategy <strategy> - Change load balancing strategy (server only)
-//   hubot lb reset - Reset round-robin counter (server only)
-//   hubot test routing [message] - Test message routing (server only)
+//   hubot load balancer status - Show load balancer statistics
+//   hubot lb strategy <strategy> - Change load balancing strategy
+//   hubot lb reset - Reset round-robin counter
+//   hubot test routing [message] - Test message routing
 //
 // Author:
 //   Joey Guerra
@@ -29,7 +26,6 @@
 import EventStore from './event-store.mjs'
 import ServiceRegistry from './service-registry.mjs'
 import LoadBalancer from './lib/load-balancer.mjs'
-import ServiceDiscoveryClient from './lib/client.mjs'
 import { WebSocketServer } from 'ws'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
@@ -51,15 +47,11 @@ export class ServiceDiscovery {
     this.discoveryPort = parseInt(process.env.HUBOT_DISCOVERY_PORT || 3100)
     this.storageDir = process.env.HUBOT_DISCOVERY_STORAGE || join(process.cwd(), 'data')
     this.heartbeatTimeoutMs = parseInt(process.env.HUBOT_DISCOVERY_TIMEOUT || 30000)
-    this.discoveryUrl = process.env.HUBOT_DISCOVERY_URL
     
-    // State
+    // State - ServiceDiscovery is always a server
     this.registry = null
     this.wss = null
-    this.discoveryClient = null // Use ServiceDiscoveryClient for client connections
-    this.heartbeatTimer = null
     this.isRegistered = false
-    this.isServer = !this.discoveryUrl // If no discovery URL provided, act as server
     
     // Load balancing state
     this.loadBalancer = null
@@ -69,19 +61,15 @@ export class ServiceDiscovery {
 
   async start() {
     try {
-      if (this.isServer) {
-        await this.startDiscoveryServer()
-        
-        // Start periodic cleanup of pending responses
-        this.cleanupTimer = setInterval(() => {
-          this.cleanupPendingResponses()
-        }, 30000) // Clean up every 30 seconds
-      } else {
-        await this.registerWithDiscovery()
-      }
+      await this.startDiscoveryServer()
+      
+      // Start periodic cleanup of pending responses
+      this.cleanupTimer = setInterval(() => {
+        this.cleanupPendingResponses()
+      }, 30000) // Clean up every 30 seconds
       
       this.registerCommands()
-      this.robot.logger.info(`Service discovery initialized for ${this.instanceId}`)
+      this.robot.logger.info(`Service discovery server initialized for ${this.instanceId}`)
     } catch (error) {
       this.robot.logger.error('Failed to initialize service discovery:', error)
     }
@@ -159,7 +147,7 @@ export class ServiceDiscovery {
       instanceId: this.instanceId,
       host: this.host,
       port: this.port,
-      isServer: this.isServer,
+      isServer: true, // ServiceDiscovery instances are always servers
       metadata: {
         adapter: this.robot.adapterName,
         brain: this.robot.brain?.constructor?.name || 'unknown',
@@ -243,85 +231,6 @@ export class ServiceDiscovery {
         
       default:
         throw new Error(`Unknown message type: ${message.type}`)
-    }
-  }
-
-  async registerWithDiscovery() {
-    try {
-      // Initialize the ServiceDiscoveryClient with auto-reconnection
-      this.discoveryClient = new ServiceDiscoveryClient(
-        this.discoveryUrl,
-        this.serviceName,
-        this.instanceId,
-        {
-          host: this.host,
-          port: this.port,
-          heartbeatInterval: this.heartbeatInterval,
-          metadata: {
-            adapter: this.robot.adapterName,
-            brain: this.robot.brain?.constructor?.name || 'unknown',
-            version: this.robot.version || '1.0.0',
-            name: this.robot.name,
-            isServer: this.isServer
-          },
-          autoReconnect: true,
-          reconnectInterval: parseInt(process.env.HUBOT_DISCOVERY_RECONNECT_INTERVAL || 5000),
-          maxReconnectAttempts: parseInt(process.env.HUBOT_DISCOVERY_MAX_RECONNECT_ATTEMPTS || 0) // 0 = infinite
-        }
-      )
-
-      // Set up event handlers
-      this.discoveryClient.on('connected', () => {
-        this.robot.logger.info(`Connected to service discovery at ${this.discoveryUrl}`)
-        // Register immediately upon connection (including reconnections)
-        this.registerInstance()
-      })
-
-      this.discoveryClient.on('disconnected', (info) => {
-        this.isRegistered = false
-        this.robot.logger.warn(`Disconnected from service discovery: ${info.reason} (code: ${info.code})`)
-      })
-
-      this.discoveryClient.on('reconnecting', (info) => {
-        this.robot.logger.info(`Reconnecting to service discovery (attempt ${info.attempt}/${info.maxAttempts || '∞'}) in ${info.interval}ms`)
-      })
-
-      this.discoveryClient.on('error', (error) => {
-        this.robot.logger.error('Discovery client error:', error.message)
-      })
-
-      // Handle incoming messages from the discovery server (e.g., chat messages to route)
-      this.discoveryClient.on('message', async (messageData) => {
-        await this.processMessageLocally(messageData)
-      })
-
-      // Connect to the discovery server
-      await this.discoveryClient.connect()
-      
-    } catch (error) {
-      this.robot.logger.error('Failed to connect to service discovery:', error)
-      throw error
-    }
-  }
-
-  async registerInstance() {
-    if (!this.discoveryClient || !this.discoveryClient.connected) {
-      return
-    }
-
-    try {
-      await this.discoveryClient.register(this.host, this.port, {
-        adapter: this.robot.adapterName,
-        brain: this.robot.brain?.constructor?.name || 'unknown',
-        version: this.robot.version || '1.0.0',
-        name: this.robot.name,
-        isServer: this.isServer
-      })
-      
-      this.isRegistered = true
-      this.robot.logger.info(`Successfully registered instance ${this.instanceId} with service discovery`)
-    } catch (error) {
-      this.robot.logger.error('Failed to register with service discovery:', error)
     }
   }
 
@@ -470,24 +379,12 @@ export class ServiceDiscovery {
   }
 
   async discoverServices(serviceName = null) {
-    if (this.isServer && this.registry) {
-      // Local discovery if we're the server
-      if (serviceName) {
-        return this.registry.discover(serviceName)
-      } else {
-        const services = this.registry.discoverAll()
-        return { services }
-      }
-    }
-    
-    if (!this.discoveryClient || !this.discoveryClient.connected) {
-      throw new Error('Not connected to service discovery')
-    }
-    
-    try {
-      return await this.discoveryClient.discoverServices(serviceName)
-    } catch (error) {
-      throw new Error(`Service discovery failed: ${error.message}`)
+    // ServiceDiscovery is always a server with local registry
+    if (serviceName) {
+      return this.registry.discover(serviceName)
+    } else {
+      const services = this.registry.discoverAll()
+      return { services }
     }
   }
 
@@ -525,7 +422,7 @@ export class ServiceDiscovery {
       const status = []
       status.push(`Instance ID: ${this.instanceId}`)
       status.push(`Service Name: ${this.serviceName}`)
-      status.push(`Mode: ${this.isServer ? 'Server' : 'Client'}`)
+      status.push(`Mode: Server`)
       status.push(`Registered: ${this.isRegistered ? 'Yes' : 'No'}`)
 
       if (this.registry) {
@@ -538,8 +435,8 @@ export class ServiceDiscovery {
       await res.reply(`🔍 Service Discovery Status:\n${status.join('\n')}`)
     })
 
-    // Load balancing commands (only available on server instances)
-    if (this.isServer && this.loadBalancer) {
+    // Load balancing commands (always available since ServiceDiscovery is always a server)
+    if (this.loadBalancer) {
       // Command to show load balancer status
       this.robot.respond(/(?:load.?balancer|lb)\s+status/i, async (res) => {
         const stats = this.loadBalancer.getStats()
@@ -604,6 +501,8 @@ export class ServiceDiscovery {
       this.robot.receiveMiddleware(async context => {
         if (!Array.from([/help/
           , /test\s+routing/
+          , /discover\s+services/i
+          , /discovery\s+status/i
           , /(?:load.?balancer|lb)\s+reset/
           , /(?:load.?balancer|lb)\s+strategy\s+(\w+)/
           , /(?:load.?balancer|lb)\s+status/i
@@ -622,26 +521,10 @@ export class ServiceDiscovery {
   }
 
   async stop() {
-    // Clear heartbeat timer (if any old references remain)
-    if (this.heartbeatTimer) {
-      clearInterval(this.heartbeatTimer)
-      this.heartbeatTimer = null
-    }
-    
     // Clear cleanup timer
     if (this.cleanupTimer) {
       clearInterval(this.cleanupTimer)
       this.cleanupTimer = null
-    }
-    
-    // Disconnect discovery client (handles deregistration automatically)
-    if (this.discoveryClient) {
-      try {
-        await this.discoveryClient.disconnect()
-      } catch (error) {
-        this.robot?.logger?.debug('Discovery client disconnect error (continuing cleanup):', error.message)
-      }
-      this.discoveryClient = null
     }
     
     // Close discovery server with timeout
