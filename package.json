@@ -6,7 +6,7 @@
   "type": "module",
   "exports": {
     ".": "./index.mjs",
-    "./adapter": "./adapter.mjs",
+    "./DiscoveryServiceAdapter": "./DiscoveryServiceAdapter.mjs",
     "./DiscoveryService.mjs": "./DiscoveryService.mjs",
     "./lib/client": "./lib/client.mjs"
   },

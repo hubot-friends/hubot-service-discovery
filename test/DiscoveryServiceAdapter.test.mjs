@@ -1,7 +1,7 @@
 import { test, describe, beforeEach, afterEach, mock } from 'node:test'
 import assert from 'node:assert'
 import { EventEmitter } from 'events'
-import DiscoveryServiceAdapter from '../adapter.mjs'
+import DiscoveryServiceAdapter from '../DiscoveryServiceAdapter.mjs'
 
 // Mock robot for testing
 class MockRobot extends EventEmitter {

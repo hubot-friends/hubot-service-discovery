@@ -1,4 +1,4 @@
-import DiscoveryServiceAdapter from './adapter.mjs'
+import DiscoveryServiceAdapter from './DiscoveryServiceAdapter.mjs'
 
 export default {
     async use(robot) {
