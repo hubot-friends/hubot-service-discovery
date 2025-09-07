@@ -6,9 +6,12 @@
   "type": "module",
   "exports": {
     ".": "./index.mjs",
-    "./DiscoveryServiceAdapter": "./DiscoveryServiceAdapter.mjs",
+    "./DiscoveryServiceAdapter.mjs": "./DiscoveryServiceAdapter.mjs",
     "./DiscoveryService.mjs": "./DiscoveryService.mjs",
-    "./lib/client": "./lib/client.mjs"
+    "./ServiceRegistry.mjs": "./ServiceRegistry.mjs",
+    "./EventStore.mjs": "./EventStore.mjs",
+    "./lib/DiscoveryServiceClient.mjs": "./lib/DiscoveryServiceClient.mjs",
+    "./lib/LoadBalancer.mjs": "./lib/LoadBalancer.mjs"
   },
   "scripts": {
     "test": "node --test --test-timeout=10000 test/**/*.test.mjs",
