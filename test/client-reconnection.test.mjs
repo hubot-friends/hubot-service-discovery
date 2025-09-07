@@ -1,7 +1,7 @@
 import { test, describe, beforeEach, afterEach, mock } from 'node:test'
 import assert from 'node:assert'
 import { EventEmitter } from 'events'
-import DiscoveryServiceClient from '../lib/client.mjs'
+import DiscoveryServiceClient from '../lib/DiscoveryServiceClient.mjs'
 
 // Mock WebSocket that can simulate connection failures
 class MockWebSocket extends EventEmitter {

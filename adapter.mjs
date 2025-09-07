@@ -1,5 +1,5 @@
 import { Adapter, TextMessage } from 'hubot'
-import DiscoveryServiceClient from './lib/client.mjs'
+import DiscoveryServiceClient from './lib/DiscoveryServiceClient.mjs'
 
 export default class DiscoveryServiceAdapter extends Adapter {
   constructor(robot) {
