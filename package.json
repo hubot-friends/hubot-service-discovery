@@ -6,19 +6,19 @@
   "type": "module",
   "exports": {
     ".": "./index.mjs",
-    "./DiscoveryServiceAdapter.mjs": "./DiscoveryServiceAdapter.mjs",
     "./DiscoveryService.mjs": "./DiscoveryService.mjs",
-    "./ServiceRegistry.mjs": "./ServiceRegistry.mjs",
-    "./EventStore.mjs": "./EventStore.mjs",
+    "./DiscoveryServiceAdapter.mjs": "./DiscoveryServiceAdapter.mjs",
     "./lib/DiscoveryServiceClient.mjs": "./lib/DiscoveryServiceClient.mjs",
-    "./lib/LoadBalancer.mjs": "./lib/LoadBalancer.mjs"
+    "./lib/EventStore.mjs": "./lib/EventStore.mjs",
+    "./lib/LoadBalancer.mjs": "./lib/LoadBalancer.mjs",
+    "./lib/ServiceRegistry.mjs": "./lib/ServiceRegistry.mjs"
   },
   "scripts": {
     "test": "node --test --test-timeout=10000 test/**/*.test.mjs",
     "test:watch": "node --test --watch --test-timeout=10000 test/**/*.test.mjs",
     "test:coverage": "node --test --experimental-test-coverage --test-timeout=10000 test/**/*.test.mjs",
-    "start": "HUBOT_LOG_LEVEL=debug hubot -n Hubot",
-    "start-client": "HUBOT_LOG_LEVEL=debug HUBOT_DISCOVERY_URL='ws://localhost:3100' HUBOT_SERVICE_NAME=hubot HUBOT_INSTANCE_ID=client-1 node --watch local-client.mjs"
+    "start": "hubot -n Hubot",
+    "start-client": "HUBOT_DISCOVERY_URL='ws://localhost:3100' HUBOT_SERVICE_NAME=hubot HUBOT_INSTANCE_ID=client-1 node --watch local-client.mjs"
   },
   "keywords": [
     "hubot",
