@@ -7,7 +7,7 @@
   "exports": {
     ".": "./index.mjs",
     "./adapter": "./adapter.mjs",
-    "./service-discovery.mjs": "./service-discovery.mjs",
+    "./DiscoveryService.mjs": "./DiscoveryService.mjs",
     "./lib/client": "./lib/client.mjs"
   },
   "scripts": {

@@ -10,7 +10,7 @@ npm install hubot-service-discovery
 ### 1. Add to external-scripts.json
 ```json
 [
-  "hubot-service-discovery/service-discovery.mjs"
+  "hubot-service-discovery/DiscoveryService.mjs"
 ]
 ```
 
@@ -36,7 +36,7 @@ hubot -a hubot-service-discovery
 
 ### Terminal 1 - Server
 ```sh
-echo '["hubot-service-discovery/service-discovery.mjs"]' > external-scripts.json
+echo '["hubot-service-discovery/DiscoveryService.mjs"]' > external-scripts.json
 
 HUBOT_DISCOVERY_PORT=3100 \
 HUBOT_SERVICE_NAME=hubot \

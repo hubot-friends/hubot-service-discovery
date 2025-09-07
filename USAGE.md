@@ -26,7 +26,7 @@ npm install hubot-service-discovery
 Add to your `external-scripts.json`:
 ```json
 [
-  "hubot-service-discovery/service-discovery.mjs"
+  "hubot-service-discovery/DiscoveryService.mjs"
 ]
 ```
 
