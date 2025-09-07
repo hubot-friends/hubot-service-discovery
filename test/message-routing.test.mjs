@@ -39,7 +39,7 @@ class MessageRouter {
   constructor() {
     this.registry = new MockServiceRegistry({ heartbeatTimeoutMs: 30000 })
     this.loadBalancer = new LoadBalancer({ strategy: 'round-robin' })
-    this.connectedClients = new Map()
+    this.connectedWorkers = new Map()
     this.pendingResponses = new Map()
   }
 
@@ -57,12 +57,12 @@ class MessageRouter {
         }
       }
 
-      const clientWs = this.connectedClients.get(selectedInstance.instanceId)
+      const workerWs = this.connectedWorkers.get(selectedInstance.instanceId)
       
-      if (!clientWs || clientWs.readyState !== 1) {
+      if (!workerWs || workerWs.readyState !== 1) {
         return { 
           success: false, 
-          error: 'Client connection not available',
+          error: 'Worker connection not available',
           shouldProcessLocally: true
         }
       }
@@ -81,7 +81,7 @@ class MessageRouter {
         data: messageData
       }
 
-      clientWs.send(JSON.stringify(routedMessage))
+      workerWs.send(JSON.stringify(routedMessage))
       
       return { 
         success: true, 
@@ -159,10 +159,10 @@ describe('Load Balancing Message Routing', () => {
 
   describe('Message Routing', () => {
     test('should route message to available instance', async () => {
-      // Register a client instance
+      // Register a worker instance
       await messageRouter.registry.register('hubot', {
         serviceName: 'hubot',
-        instanceId: 'client-1',
+        instanceId: 'worker-1',
         isServer: false,
         host: 'localhost',
         port: 8081,
@@ -171,7 +171,7 @@ describe('Load Balancing Message Routing', () => {
 
       // Mock WebSocket connection
       const mockWs = new MockWebSocket()
-      messageRouter.connectedClients.set('client-1', mockWs)
+      messageRouter.connectedWorkers.set('worker-1', mockWs)
 
       const messageData = {
         user: { id: 'user1', name: 'Test User' },
@@ -182,7 +182,7 @@ describe('Load Balancing Message Routing', () => {
       const result = await messageRouter.routeMessage(messageData)
 
       assert.strictEqual(result.success, true)
-      assert.strictEqual(result.routedTo, 'client-1')
+      assert.strictEqual(result.routedTo, 'worker-1')
       assert(result.messageId)
 
       // Check that message was sent to client
@@ -205,11 +205,11 @@ describe('Load Balancing Message Routing', () => {
       assert(result.error.includes('No healthy instances available'))
     })
 
-    test('should return error when client connection not available', async () => {
+    test('should return error when worker connection not available', async () => {
       // Register instance but don't add WebSocket connection
       await messageRouter.registry.register('hubot', {
         serviceName: 'hubot',
-        instanceId: 'client-1',
+        instanceId: 'worker-1',
         isServer: false,
         lastHeartbeat: Date.now()
       })
@@ -224,20 +224,20 @@ describe('Load Balancing Message Routing', () => {
 
       assert.strictEqual(result.success, false)
       assert.strictEqual(result.shouldProcessLocally, true)
-      assert(result.error.includes('Client connection not available'))
+      assert(result.error.includes('Worker connection not available'))
     })
 
     test('should handle multiple instances with round-robin', async () => {
-      // Register multiple client instances
+      // Register multiple worker instances
       await messageRouter.registry.register('hubot', {
         serviceName: 'hubot',
-        instanceId: 'client-1',
+        instanceId: 'worker-1',
         isServer: false,
         lastHeartbeat: Date.now()
       })
       await messageRouter.registry.register('hubot', {
         serviceName: 'hubot',
-        instanceId: 'client-2',
+        instanceId: 'worker-2',
         isServer: false,
         lastHeartbeat: Date.now()
       })
@@ -245,8 +245,8 @@ describe('Load Balancing Message Routing', () => {
       // Mock WebSocket connections
       const mockWs1 = new MockWebSocket()
       const mockWs2 = new MockWebSocket()
-      messageRouter.connectedClients.set('client-1', mockWs1)
-      messageRouter.connectedClients.set('client-2', mockWs2)
+      messageRouter.connectedWorkers.set('worker-1', mockWs1)
+      messageRouter.connectedWorkers.set('worker-2', mockWs2)
 
       const messageData = {
         user: { id: 'user1', name: 'Test User' },
@@ -254,17 +254,17 @@ describe('Load Balancing Message Routing', () => {
         room: 'general'
       }
 
-      // First message should go to client-1
+      // First message should go to worker-1
       const result1 = await messageRouter.routeMessage(messageData)
-      assert.strictEqual(result1.routedTo, 'client-1')
+      assert.strictEqual(result1.routedTo, 'worker-1')
 
-      // Second message should go to client-2
+      // Second message should go to worker-2
       const result2 = await messageRouter.routeMessage(messageData)
-      assert.strictEqual(result2.routedTo, 'client-2')
+      assert.strictEqual(result2.routedTo, 'worker-2')
 
-      // Third message should go back to client-1
+      // Third message should go back to worker-1
       const result3 = await messageRouter.routeMessage(messageData)
-      assert.strictEqual(result3.routedTo, 'client-1')
+      assert.strictEqual(result3.routedTo, 'worker-1')
     })
   })
 
@@ -276,7 +276,7 @@ describe('Load Balancing Message Routing', () => {
       messageRouter.pendingResponses.set(messageId, {
         timestamp: Date.now(),
         originalMessage: { text: 'Hello' },
-        selectedInstance: 'client-1'
+        selectedInstance: 'worker-1'
       })
 
       const responseData = {
@@ -330,12 +330,12 @@ describe('Load Balancing Message Routing', () => {
       messageRouter.pendingResponses.set('fresh-msg', {
         timestamp: now,
         originalMessage: { text: 'Fresh' },
-        selectedInstance: 'client-1'
+        selectedInstance: 'worker-1'
       })
       messageRouter.pendingResponses.set('old-msg', {
         timestamp: oldTime,
         originalMessage: { text: 'Old' },
-        selectedInstance: 'client-1'
+        selectedInstance: 'worker-1'
       })
 
       assert.strictEqual(messageRouter.pendingResponses.size, 2)

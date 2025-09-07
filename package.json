@@ -45,5 +45,14 @@
   "directories": {
     "example": "examples",
     "test": "test"
+  },
+  "release": {
+    "branches": [
+      "main"
+    ],
+    "dryRun": false
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

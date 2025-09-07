@@ -55,7 +55,7 @@ export class ServiceDiscovery {
     
     // Load balancing state
     this.loadBalancer = null
-    this.connectedClients = new Map() // Map of client websockets by instance ID
+    this.connectedWorkers = new Map() // Map of worker websockets by instance ID
     this.pendingResponses = new Map() // Map of pending message responses
   }
 
@@ -95,11 +95,11 @@ export class ServiceDiscovery {
     this.wss = new WebSocketServer({ port: this.discoveryPort })
     
     this.wss.on('connection', (ws, req) => {
-      const clientId = `${req.socket.remoteAddress}:${req.socket.remotePort}`
-      this.robot.logger.debug(`Discovery client connected: ${clientId}`)
+      const workerId = `${req.socket.remoteAddress}:${req.socket.remotePort}`
+      this.robot.logger.debug(`Discovery worker connected: ${workerId}`)
       
-      // Store client connection for message routing
-      ws.clientId = clientId
+      // Store worker connection for message routing
+      ws.workerId = workerId
       ws.instanceId = null // Will be set during registration
       
       ws.on('message', async (data) => {
@@ -110,7 +110,7 @@ export class ServiceDiscovery {
             ws.send(JSON.stringify(response))
           }
         } catch (error) {
-          this.robot.logger.error(`Error processing discovery message from ${clientId}:`, error)
+          this.robot.logger.error(`Error processing discovery message from ${workerId}:`, error)
           ws.send(JSON.stringify({ 
             success: false, 
             error: error.message 
@@ -119,10 +119,10 @@ export class ServiceDiscovery {
       })
       
       ws.on('close', () => {
-        this.robot.logger.debug(`Discovery client disconnected: ${clientId}`)
-        // Remove from connected clients if it was registered
+        this.robot.logger.debug(`Discovery worker disconnected: ${workerId}`)
+        // Remove from connected workers if it was registered
         if (ws.instanceId) {
-          this.connectedClients.delete(ws.instanceId)
+          this.connectedWorkers.delete(ws.instanceId)
         }
       })
     })
@@ -166,11 +166,11 @@ export class ServiceDiscovery {
       case 'register':
         await this.registry.register(message.data.serviceName, message.data)
         
-        // Store client connection for load balancing if it's not a server instance
+        // Store worker connection for load balancing if it's not a server instance
         if (ws && !message.data.isServer) {
           ws.instanceId = message.data.instanceId
-          this.connectedClients.set(message.data.instanceId, ws)
-          this.robot.logger.debug(`Registered client instance for load balancing: ${message.data.instanceId}`)
+          this.connectedWorkers.set(message.data.instanceId, ws)
+          this.robot.logger.debug(`Registered worker instance for load balancing: ${message.data.instanceId}`)
         }
         
         return { success: true, message: 'Service registered successfully' }
@@ -178,9 +178,9 @@ export class ServiceDiscovery {
       case 'deregister':
         await this.registry.deregister(message.data.serviceName, message.data.instanceId)
         
-        // Remove from connected clients
+        // Remove from connected workers
         if (ws && ws.instanceId) {
-          this.connectedClients.delete(ws.instanceId)
+          this.connectedWorkers.delete(ws.instanceId)
         }
         
         return { success: true, message: 'Service deregistered successfully' }
@@ -216,7 +216,7 @@ export class ServiceDiscovery {
             totalServices: Object.keys(allServices).length,
             totalInstances: Object.values(allServices).reduce((sum, instances) => sum + instances.length, 0),
             healthyInstances,
-            connectedClients: this.connectedClients.size,
+            connectedWorkers: this.connectedWorkers.size,
             loadBalancer: lbStats
           }
         }
@@ -249,13 +249,13 @@ export class ServiceDiscovery {
         }
       }
 
-      // Get the client connection for the selected instance
-      const clientWs = this.connectedClients.get(selectedInstance.instanceId)
-      if (!clientWs || clientWs.readyState !== 1) { // 1 = WebSocket.OPEN
-        this.robot.logger.warn(`Client connection not available for instance: ${selectedInstance.instanceId}`)
+      // Get the worker connection for the selected instance
+      const workerWs = this.connectedWorkers.get(selectedInstance.instanceId)
+      if (!workerWs || workerWs.readyState !== 1) { // 1 = WebSocket.OPEN
+        this.robot.logger.warn(`Worker connection not available for instance: ${selectedInstance.instanceId}`)
         return { 
           success: false, 
-          error: 'Client connection not available',
+          error: 'Worker connection not available',
           shouldProcessLocally: true
         }
       }
@@ -277,7 +277,7 @@ export class ServiceDiscovery {
         data: messageData
       }
 
-      clientWs.send(JSON.stringify(routedMessage))
+      workerWs.send(JSON.stringify(routedMessage))
       
       this.robot.logger.debug(`Message routed to instance: ${selectedInstance.instanceId}`)
       
@@ -450,7 +450,7 @@ export class ServiceDiscovery {
         }
         const status = []
         status.push(`Strategy: ${stats.strategy}`)
-        status.push(`Connected Clients: ${this.connectedClients.size}`)
+        status.push(`Connected Workers: ${this.connectedWorkers.size}`)
         status.push(`Healthy Instances: ${healthyInstances}`)
         status.push(`Total Instances: ${totalInstances}`)
         status.push(`Pending Responses: ${this.pendingResponses.size}`)
@@ -568,7 +568,7 @@ export class ServiceDiscovery {
     
     // Clear load balancer references
     this.loadBalancer = null
-    this.connectedClients.clear()
+    this.connectedWorkers.clear()
     this.pendingResponses.clear()
     
     this.isRegistered = false

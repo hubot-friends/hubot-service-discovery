@@ -120,7 +120,7 @@ describe('ServiceDiscovery Load Balancing Integration', () => {
     // Reset round-robin index for consistent test results
     serviceDiscovery.loadBalancer.resetRoundRobin()
     
-    serviceDiscovery.connectedClients = new Map()
+    serviceDiscovery.connectedWorkers = new Map()
     serviceDiscovery.pendingResponses = new Map()
   })
 
@@ -134,8 +134,8 @@ describe('ServiceDiscovery Load Balancing Integration', () => {
         }
         
         // Clear maps
-        if (serviceDiscovery.connectedClients) {
-          serviceDiscovery.connectedClients.clear()
+        if (serviceDiscovery.connectedWorkers) {
+          serviceDiscovery.connectedWorkers.clear()
         }
         if (serviceDiscovery.pendingResponses) {
           serviceDiscovery.pendingResponses.clear()
@@ -161,7 +161,7 @@ describe('ServiceDiscovery Load Balancing Integration', () => {
     test('should route message to available instance', async () => {
       // Register a client instance
       await serviceDiscovery.registry.register('hubot', {
-        instanceId: 'client-1',
+        instanceId: 'worker-1',
         host: 'localhost',
         port: 8081,
         isServer: false,
@@ -169,11 +169,11 @@ describe('ServiceDiscovery Load Balancing Integration', () => {
       })
 
       // Send initial heartbeat to make instance healthy
-      await serviceDiscovery.registry.heartbeat('hubot', 'client-1')
+      await serviceDiscovery.registry.heartbeat('hubot', 'worker-1')
 
       // Mock WebSocket connection
       const mockWs = new MockWebSocket()
-      serviceDiscovery.connectedClients.set('client-1', mockWs)
+      serviceDiscovery.connectedWorkers.set('worker-1', mockWs)
 
       const messageData = {
         user: { id: 'user1', name: 'Test User' },
@@ -184,7 +184,7 @@ describe('ServiceDiscovery Load Balancing Integration', () => {
       const result = await serviceDiscovery.routeMessage(messageData)
 
       assert.strictEqual(result.success, true)
-      assert.strictEqual(result.routedTo, 'client-1')
+      assert.strictEqual(result.routedTo, 'worker-1')
       assert(result.messageId)
 
       // Check that message was sent to client
@@ -204,13 +204,13 @@ describe('ServiceDiscovery Load Balancing Integration', () => {
 
       assert.strictEqual(result.success, false)
       assert.strictEqual(result.shouldProcessLocally, true)
-      assert(result.error.includes('No healthy instances available') || result.error.includes('Client connection not available'))
+      assert(result.error.includes('No healthy instances available') || result.error.includes('Worker connection not available'))
     })
 
-    test('should return error when client connection not available', async () => {
+    test('should return error when worker connection not available', async () => {
       // Register instance but don't add WebSocket connection
       await serviceDiscovery.registry.register('hubot', {
-        instanceId: 'client-1',
+        instanceId: 'worker-1',
         host: 'localhost',
         port: 8081,
         isServer: false,
@@ -218,7 +218,7 @@ describe('ServiceDiscovery Load Balancing Integration', () => {
       })
 
       // Send initial heartbeat to make instance healthy
-      await serviceDiscovery.registry.heartbeat('hubot', 'client-1')
+      await serviceDiscovery.registry.heartbeat('hubot', 'worker-1')
 
       const messageData = {
         user: { id: 'user1', name: 'Test User' },
@@ -230,7 +230,7 @@ describe('ServiceDiscovery Load Balancing Integration', () => {
 
       assert.strictEqual(result.success, false)
       assert.strictEqual(result.shouldProcessLocally, true)
-      assert(result.error.includes('Client connection not available'))
+      assert(result.error.includes('Worker connection not available'))
     })
 
     test('should handle multiple instances with round-robin', async () => {
@@ -245,14 +245,14 @@ describe('ServiceDiscovery Load Balancing Integration', () => {
       
       // Register multiple client instances in a specific order
       await serviceDiscovery.registry.register('hubot', {
-        instanceId: 'client-1',
+        instanceId: 'worker-1',
         host: 'localhost',
         port: 8081,
         isServer: false,
         metadata: { adapter: 'test' }
       })
       await serviceDiscovery.registry.register('hubot', {
-        instanceId: 'client-2',
+        instanceId: 'worker-2',
         host: 'localhost',
         port: 8082,
         isServer: false,
@@ -260,14 +260,14 @@ describe('ServiceDiscovery Load Balancing Integration', () => {
       })
 
       // Send initial heartbeats to make instances healthy
-      await serviceDiscovery.registry.heartbeat('hubot', 'client-1')
-      await serviceDiscovery.registry.heartbeat('hubot', 'client-2')
+      await serviceDiscovery.registry.heartbeat('hubot', 'worker-1')
+      await serviceDiscovery.registry.heartbeat('hubot', 'worker-2')
 
       // Mock WebSocket connections
       const mockWs1 = new MockWebSocket()
       const mockWs2 = new MockWebSocket()
-      serviceDiscovery.connectedClients.set('client-1', mockWs1)
-      serviceDiscovery.connectedClients.set('client-2', mockWs2)
+      serviceDiscovery.connectedWorkers.set('worker-1', mockWs1)
+      serviceDiscovery.connectedWorkers.set('worker-2', mockWs2)
 
       // Reset round-robin index to ensure test determinism
       serviceDiscovery.loadBalancer.resetRoundRobin()
@@ -335,7 +335,7 @@ describe('ServiceDiscovery Load Balancing Integration', () => {
       serviceDiscovery.pendingResponses.set(messageId, {
         timestamp: Date.now(),
         originalMessage: { text: 'Hello' },
-        selectedInstance: 'client-1'
+        selectedInstance: 'worker-1'
       })
 
       const responseData = {
@@ -393,12 +393,12 @@ describe('ServiceDiscovery Load Balancing Integration', () => {
       serviceDiscovery.pendingResponses.set('fresh-msg', {
         timestamp: now,
         originalMessage: { text: 'Fresh' },
-        selectedInstance: 'client-1'
+        selectedInstance: 'worker-1'
       })
       serviceDiscovery.pendingResponses.set('old-msg', {
         timestamp: oldTime,
         originalMessage: { text: 'Old' },
-        selectedInstance: 'client-1'
+        selectedInstance: 'worker-1'
       })
 
       assert.strictEqual(serviceDiscovery.pendingResponses.size, 2)
@@ -415,14 +415,14 @@ describe('ServiceDiscovery Load Balancing Integration', () => {
   describe('Client Connection Management', () => {
     test('should handle client registration and deregistration', async () => {
       const mockWs = new MockWebSocket()
-      mockWs.instanceId = 'client-1'
+      mockWs.instanceId = 'worker-1'
 
       // Test registration
       const registerResponse = await serviceDiscovery.handleDiscoveryMessage({
         type: 'register',
         data: {
           serviceName: 'hubot',
-          instanceId: 'client-1',
+          instanceId: 'worker-1',
           isServer: false,
           host: 'localhost',
           port: 8081
@@ -430,19 +430,19 @@ describe('ServiceDiscovery Load Balancing Integration', () => {
       }, mockWs)
 
       assert.strictEqual(registerResponse.success, true)
-      assert.strictEqual(serviceDiscovery.connectedClients.has('client-1'), true)
+      assert.strictEqual(serviceDiscovery.connectedWorkers.has('worker-1'), true)
 
       // Test deregistration
       const deregisterResponse = await serviceDiscovery.handleDiscoveryMessage({
         type: 'deregister',
         data: {
           serviceName: 'hubot',
-          instanceId: 'client-1'
+          instanceId: 'worker-1'
         }
       }, mockWs)
 
       assert.strictEqual(deregisterResponse.success, true)
-      assert.strictEqual(serviceDiscovery.connectedClients.has('client-1'), false)
+      assert.strictEqual(serviceDiscovery.connectedWorkers.has('worker-1'), false)
     })
 
     test('should not register server instances for load balancing', async () => {
@@ -460,7 +460,7 @@ describe('ServiceDiscovery Load Balancing Integration', () => {
       }, mockWs)
 
       // Server instance should not be added to connected clients
-      assert.strictEqual(serviceDiscovery.connectedClients.has('server-1'), false)
+      assert.strictEqual(serviceDiscovery.connectedWorkers.has('server-1'), false)
     })
   })
 
@@ -468,7 +468,7 @@ describe('ServiceDiscovery Load Balancing Integration', () => {
     test('should include load balancer stats in health response', async () => {
       // Register some instances
       await serviceDiscovery.registry.register('hubot', {
-        instanceId: 'client-1',
+        instanceId: 'worker-1',
         host: 'localhost',
         port: 8081,
         isServer: false,
@@ -476,7 +476,7 @@ describe('ServiceDiscovery Load Balancing Integration', () => {
       })
 
       // Send initial heartbeat to make instance healthy
-      await serviceDiscovery.registry.heartbeat('hubot', 'client-1')
+      await serviceDiscovery.registry.heartbeat('hubot', 'worker-1')
 
       const response = await serviceDiscovery.handleDiscoveryMessage({
         type: 'health'
@@ -485,7 +485,7 @@ describe('ServiceDiscovery Load Balancing Integration', () => {
       assert.strictEqual(response.success, true)
       assert(response.data.loadBalancer)
       assert.strictEqual(response.data.loadBalancer.strategy, 'round-robin')
-      assert.strictEqual(response.data.connectedClients, 0)
+      assert.strictEqual(response.data.connectedWorkers, 0)
     })
   })
 

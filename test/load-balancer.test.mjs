@@ -41,13 +41,13 @@ describe('LoadBalancer', () => {
 
     test('should select instance using configured strategy', () => {
       const instances = [
-        { instanceId: 'client-1' },
-        { instanceId: 'client-2' }
+        { instanceId: 'worker-1' },
+        { instanceId: 'worker-2' }
       ]
 
       const instance = loadBalancer.selectInstance(instances)
       assert(instance)
-      assert.strictEqual(instance.instanceId, 'client-1') // First in round-robin
+      assert.strictEqual(instance.instanceId, 'worker-1') // First in round-robin
     })
   })
 
