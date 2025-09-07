@@ -1,5 +1,5 @@
 import { EventEmitter } from 'events'
-import EventStore from './event-store.mjs'
+import EventStore from './EventStore.mjs'
 
 export class ServiceRegistry extends EventEmitter {
   constructor(options = {}) {
