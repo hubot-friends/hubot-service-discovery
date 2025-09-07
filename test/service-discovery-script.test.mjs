@@ -3,7 +3,7 @@ import assert from 'node:assert'
 import { EventEmitter } from 'events'
 import { existsSync, rmSync, mkdirSync } from 'fs'
 import { join } from 'path'
-import serviceDiscoveryScript from '../service-discovery.mjs'
+import DiscoveryServiceScript from '../DiscoveryService.mjs'
 
 // Mock robot for testing
 class MockRobot extends EventEmitter {
@@ -18,7 +18,7 @@ class MockRobot extends EventEmitter {
       error: mock.fn(),
       warn: mock.fn()
     }
-    this.serviceDiscovery = null
+    this.DiscoveryService = null
     this.brain = {
       connectToPeer: mock.fn(),
       getPeerCount: mock.fn(() => 0)
@@ -57,7 +57,7 @@ class MockResponse {
   }
 }
 
-describe('ServiceDiscovery Script', () => {
+describe('DiscoveryService Script', () => {
   let robot
   let testDir
   let originalEnv
@@ -87,8 +87,8 @@ describe('ServiceDiscovery Script', () => {
     process.env = originalEnv
     
     // Cleanup service discovery
-    if (robot.serviceDiscovery) {
-      await robot.serviceDiscovery.stop()
+    if (robot.discoveryService) {
+      await robot.discoveryService.stop()
     }
     
     // Cleanup test directory
@@ -98,15 +98,15 @@ describe('ServiceDiscovery Script', () => {
   })
 
   test('should initialize service discovery script', async () => {
-    await serviceDiscoveryScript(robot)
-    assert(robot.serviceDiscovery, 'Should attach serviceDiscovery to robot')
-    assert.strictEqual(robot.serviceDiscovery.instanceId, 'test-instance')
-    assert.strictEqual(robot.serviceDiscovery.serviceName, 'hubot')
-    assert(robot.serviceDiscovery.registry, 'Should have a registry (always a server)')
+    await DiscoveryServiceScript(robot)
+    assert(robot.discoveryService, 'Should attach DiscoveryService to robot')
+    assert.strictEqual(robot.discoveryService.instanceId, 'test-instance')
+    assert.strictEqual(robot.discoveryService.serviceName, 'hubot')
+    assert(robot.discoveryService.registry, 'Should have a registry (always a server)')
   })
 
   test('should register commands', async () => {
-    await serviceDiscoveryScript(robot)
+    await DiscoveryServiceScript(robot)
     
     // Check that commands were registered
     assert(robot.commands.length > 0, 'Should have registered some commands')
@@ -116,35 +116,35 @@ describe('ServiceDiscovery Script', () => {
     assert(patterns.some(p => p.includes('discover')), 'Should register discover command')
     assert(patterns.some(p => p.includes('status')), 'Should register status command')
     
-    // Load balancer commands are always available (ServiceDiscovery is always a server)
-    const serviceDiscovery = robot.serviceDiscovery
-    if (serviceDiscovery.loadBalancer) {
+    // Load balancer commands are always available (DiscoveryService is always a server)
+    const DiscoveryService = robot.discoveryService
+    if (DiscoveryService.loadBalancer) {
       assert(patterns.some(p => p.includes('load') || p.includes('lb')), 'Should register load balancer commands')
       assert(patterns.some(p => p.includes('routing')), 'Should register routing test command')
     }
   })
 
   test('should start as server when no discovery URL provided', async () => {
-    await serviceDiscoveryScript(robot)
+    await DiscoveryServiceScript(robot)
     
-    assert(robot.serviceDiscovery.registry, 'Should have registry (always a server)')
+    assert(robot.discoveryService.registry, 'Should have registry (always a server)')
   })
 
   test('should always start as server', async () => {
-    // Set discovery URL to test that it's ignored (ServiceDiscovery is always a server)
+    // Set discovery URL to test that it's ignored (DiscoveryService is always a server)
     process.env.HUBOT_DISCOVERY_URL = 'ws://localhost:3100'
     
-    await serviceDiscoveryScript(robot)
+    await DiscoveryServiceScript(robot)
     
-    assert(robot.serviceDiscovery.registry, 'Should still have registry (always a server)')
+    assert(robot.discoveryService.registry, 'Should still have registry (always a server)')
   })
 
   test('should handle discovery messages as server', async () => {
-    await serviceDiscoveryScript(robot)
+    await DiscoveryServiceScript(robot)
     
     // Start as server
 
-    const serviceDiscovery = robot.serviceDiscovery
+    const DiscoveryService = robot.discoveryService
 
     // Test register message
     const registerMessage = {
@@ -158,7 +158,7 @@ describe('ServiceDiscovery Script', () => {
       }
     }
 
-    const response = await serviceDiscovery.handleDiscoveryMessage(registerMessage)
+    const response = await DiscoveryService.handleDiscoveryMessage(registerMessage)
     assert.strictEqual(response.success, true)
     assert(response.message.includes('registered'))
 
@@ -168,21 +168,21 @@ describe('ServiceDiscovery Script', () => {
       data: { serviceName: 'test-service' }
     }
 
-    const discoverResponse = await serviceDiscovery.handleDiscoveryMessage(discoverMessage)
+    const discoverResponse = await DiscoveryService.handleDiscoveryMessage(discoverMessage)
     assert.strictEqual(discoverResponse.success, true)
     assert.strictEqual(discoverResponse.data.serviceName, 'test-service')
     assert(Array.isArray(discoverResponse.data.instances))
   })
 
   test('should handle heartbeat messages', async () => {
-    await serviceDiscoveryScript(robot)
+    await DiscoveryServiceScript(robot)
     
     // Start as server
 
-    const serviceDiscovery = robot.serviceDiscovery
+    const DiscoveryService = robot.discoveryService
 
     // Register a service first
-    await serviceDiscovery.handleDiscoveryMessage({
+    await DiscoveryService.handleDiscoveryMessage({
       type: 'register',
       data: {
         serviceName: 'test-service',
@@ -193,7 +193,7 @@ describe('ServiceDiscovery Script', () => {
     })
 
     // Send heartbeat
-    const heartbeatResponse = await serviceDiscovery.handleDiscoveryMessage({
+    const heartbeatResponse = await DiscoveryService.handleDiscoveryMessage({
       type: 'heartbeat',
       data: {
         serviceName: 'test-service',
@@ -205,13 +205,13 @@ describe('ServiceDiscovery Script', () => {
   })
 
   test('should handle health check messages', async () => {
-    await serviceDiscoveryScript(robot)
+    await DiscoveryServiceScript(robot)
     
     // Start as server
 
-    const serviceDiscovery = robot.serviceDiscovery
+    const DiscoveryService = robot.discoveryService
 
-    const healthResponse = await serviceDiscovery.handleDiscoveryMessage({
+    const healthResponse = await DiscoveryService.handleDiscoveryMessage({
       type: 'health',
       data: {}
     })
@@ -224,12 +224,12 @@ describe('ServiceDiscovery Script', () => {
   })
 
   test('should list healthy instances when 2 out of 3 are healthy', async () => {
-    await serviceDiscoveryScript(robot)
+    await DiscoveryServiceScript(robot)
 
-    const serviceDiscovery = robot.serviceDiscovery
+    const DiscoveryService = robot.discoveryService
 
     // Register 3 instances, 2 healthy and 1 unhealthy
-    await serviceDiscovery.handleDiscoveryMessage({
+    await DiscoveryService.handleDiscoveryMessage({
       type: 'register',
       data: {
         serviceName: 'test-service',
@@ -239,7 +239,7 @@ describe('ServiceDiscovery Script', () => {
       }
     })
 
-    await serviceDiscovery.handleDiscoveryMessage({
+    await DiscoveryService.handleDiscoveryMessage({
       type: 'register',
       data: {
         serviceName: 'test-service',
@@ -249,7 +249,7 @@ describe('ServiceDiscovery Script', () => {
       }
     })
 
-    await serviceDiscovery.handleDiscoveryMessage({
+    await DiscoveryService.handleDiscoveryMessage({
       type: 'register',
       data: {
         serviceName: 'test-service',
@@ -260,7 +260,7 @@ describe('ServiceDiscovery Script', () => {
     })
 
     // Simulate heartbeats for only 2 instances (making the 3rd unhealthy)
-    await serviceDiscovery.handleDiscoveryMessage({
+    await DiscoveryService.handleDiscoveryMessage({
       type: 'heartbeat',
       data: {
         serviceName: 'test-service',
@@ -268,7 +268,7 @@ describe('ServiceDiscovery Script', () => {
       }
     })
 
-    await serviceDiscovery.handleDiscoveryMessage({
+    await DiscoveryService.handleDiscoveryMessage({
       type: 'heartbeat',
       data: {
         serviceName: 'test-service',
@@ -278,17 +278,17 @@ describe('ServiceDiscovery Script', () => {
 
     // Make test-instance-3 unhealthy by setting an old heartbeat timestamp
     const oldTimestamp = Date.now() - 70000 // 70 seconds ago (past the 60-second timeout)
-    serviceDiscovery.registry.instanceHeartbeats.set('test-instance-3', oldTimestamp)
+    DiscoveryService.registry.instanceHeartbeats.set('test-instance-3', oldTimestamp)
 
     // List healthy instances using the new pattern
-    const healthyInstances = serviceDiscovery.registry.getHealthyInstances('test-service')
+    const healthyInstances = DiscoveryService.registry.getHealthyInstances('test-service')
     assert.strictEqual(healthyInstances.length, 2)
     assert(healthyInstances.some(instance => instance.instanceId === 'test-instance-1'))
     assert(healthyInstances.some(instance => instance.instanceId === 'test-instance-2'))
   })
 
   test('should execute discover services command', async () => {
-    await serviceDiscoveryScript(robot)
+    await DiscoveryServiceScript(robot)
     
     // Start as server
 
@@ -310,7 +310,7 @@ describe('ServiceDiscovery Script', () => {
   })
 
   test('should execute discovery status command', async () => {
-    await serviceDiscoveryScript(robot)
+    await DiscoveryServiceScript(robot)
     
     // Start as server
 
@@ -333,33 +333,33 @@ describe('ServiceDiscovery Script', () => {
   })
 
   test('should clean up properly', async () => {
-    await serviceDiscoveryScript(robot)
+    await DiscoveryServiceScript(robot)
     
     // Start as server
 
-    const serviceDiscovery = robot.serviceDiscovery
+    const DiscoveryService = robot.discoveryService
 
     // Verify everything is initialized
-    assert(serviceDiscovery.registry)
-    assert(serviceDiscovery.wss)
+    assert(DiscoveryService.registry)
+    assert(DiscoveryService.wss)
 
     // Stop and verify cleanup
-    await serviceDiscovery.stop()
+    await DiscoveryService.stop()
     
-    assert.strictEqual(serviceDiscovery.registry, null)
-    assert.strictEqual(serviceDiscovery.wss, null)
-    assert.strictEqual(serviceDiscovery.cleanupTimer, null)
+    assert.strictEqual(DiscoveryService.registry, null)
+    assert.strictEqual(DiscoveryService.wss, null)
+    assert.strictEqual(DiscoveryService.cleanupTimer, null)
   })
 
   test('should handle unknown message types', async () => {
-    await serviceDiscoveryScript(robot)
+    await DiscoveryServiceScript(robot)
     
     // Start as server
 
-    const serviceDiscovery = robot.serviceDiscovery
+    const DiscoveryService = robot.discoveryService
 
     try {
-      await serviceDiscovery.handleDiscoveryMessage({
+      await DiscoveryService.handleDiscoveryMessage({
         type: 'unknown-type',
         data: {}
       })
@@ -370,17 +370,17 @@ describe('ServiceDiscovery Script', () => {
   })
 
   test('should register self when acting as server', async () => {
-    await serviceDiscoveryScript(robot)
+    await DiscoveryServiceScript(robot)
     
     // Start as server
 
-    const serviceDiscovery = robot.serviceDiscovery
+    const DiscoveryService = robot.discoveryService
 
     // Should be registered
-    assert.strictEqual(serviceDiscovery.isRegistered, true)
+    assert.strictEqual(DiscoveryService.isRegistered, true)
 
     // Should be able to discover itself
-    const result = await serviceDiscovery.discoverServices('hubot')
+    const result = await DiscoveryService.discoverServices('hubot')
     assert(result.instances.length >= 1, 'Should find at least itself')
     
     const selfInstance = result.instances.find(i => i.instanceId === 'test-instance')

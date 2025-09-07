@@ -1,7 +1,7 @@
 import { resolve } from 'node:path'
 import Hubot from 'hubot'
 
-const robot = Hubot.loadBot('ServiceDiscovery', false, 'Hubot', null)
+const robot = Hubot.loadBot('DiscoveryService', false, 'Hubot', null)
 await robot.loadAdapter('./index.mjs')
 const tasks = ['./client-scripts'].map((scriptPath) => {
     if (scriptPath[0] === '/') {

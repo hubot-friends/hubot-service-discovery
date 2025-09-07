@@ -1,7 +1,7 @@
 import { test, describe, beforeEach, afterEach, mock } from 'node:test'
 import assert from 'node:assert'
 import { EventEmitter } from 'events'
-import ServiceDiscoveryClient from '../lib/client.mjs'
+import DiscoveryServiceClient from '../lib/client.mjs'
 
 // Mock WebSocket that can simulate connection failures
 class MockWebSocket extends EventEmitter {
@@ -71,7 +71,7 @@ function waitForEvent(emitter, eventName, timeout = 1000) {
   })
 }
 
-describe('ServiceDiscoveryClient Reconnection', () => {
+describe('DiscoveryServiceClient Reconnection', () => {
   let client
   let mockWebSocketClass
 
@@ -83,7 +83,7 @@ describe('ServiceDiscoveryClient Reconnection', () => {
       }
     }
     
-    client = new ServiceDiscoveryClient(
+    client = new DiscoveryServiceClient(
       'ws://localhost:3100',
       'test-service',
       'test-instance-1',
@@ -107,7 +107,7 @@ describe('ServiceDiscoveryClient Reconnection', () => {
 
   describe('Auto-reconnection configuration', () => {
     test('should initialize with default reconnection settings', () => {
-      const defaultClient = new ServiceDiscoveryClient(
+      const defaultClient = new DiscoveryServiceClient(
         'ws://localhost:3100',
         'test-service',
         'test-instance'
@@ -120,7 +120,7 @@ describe('ServiceDiscoveryClient Reconnection', () => {
     })
 
     test('should respect custom reconnection settings', () => {
-      const customClient = new ServiceDiscoveryClient(
+      const customClient = new DiscoveryServiceClient(
         'ws://localhost:3100',
         'test-service',
         'test-instance',
@@ -142,7 +142,7 @@ describe('ServiceDiscoveryClient Reconnection', () => {
       process.env.HUBOT_DISCOVERY_RECONNECT_INTERVAL = '3000'
       process.env.HUBOT_DISCOVERY_MAX_RECONNECT_ATTEMPTS = '10'
       
-      const envClient = new ServiceDiscoveryClient(
+      const envClient = new DiscoveryServiceClient(
         'ws://localhost:3100',
         'test-service',
         'test-instance'

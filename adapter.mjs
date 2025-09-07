@@ -1,7 +1,7 @@
 import { Adapter, TextMessage } from 'hubot'
-import ServiceDiscoveryClient from './lib/client.mjs'
+import DiscoveryServiceClient from './lib/client.mjs'
 
-export default class ServiceDiscoveryAdapter extends Adapter {
+export default class DiscoveryServiceAdapter extends Adapter {
   constructor(robot) {
     super(robot)
     
@@ -17,7 +17,7 @@ export default class ServiceDiscoveryAdapter extends Adapter {
     this.port = parseInt(process.env.HUBOT_PORT || process.env.PORT || 8080)
     
     // Initialize client
-    this.client = new ServiceDiscoveryClient(
+    this.client = new DiscoveryServiceClient(
       this.discoveryUrl,
       this.serviceName,
       this.instanceId,
@@ -165,4 +165,4 @@ export default class ServiceDiscoveryAdapter extends Adapter {
 }
 
 // Support both named and default exports for compatibility
-export { ServiceDiscoveryAdapter }
+export { DiscoveryServiceAdapter }

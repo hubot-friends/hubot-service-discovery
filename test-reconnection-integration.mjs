@@ -5,7 +5,7 @@
  * Run this manually to test the actual behavior
  */
 
-import { ServiceDiscovery } from './service-discovery.mjs'
+import { DiscoveryService } from './DiscoveryService.mjs'
 import { EventEmitter } from 'events'
 
 // Mock robot
@@ -25,7 +25,7 @@ async function testReconnectionBehavior() {
   
   // Start a server instance with a random port to avoid conflicts
   const serverPort = 3100 + Math.floor(Math.random() * 1000)
-  const server = new ServiceDiscovery(mockRobot)
+  const server = new DiscoveryService(mockRobot)
   server.discoveryUrl = null // Act as server
   server.discoveryPort = serverPort
   await server.start()
@@ -51,7 +51,7 @@ async function testReconnectionBehavior() {
       debug: (msg) => console.log('[CLIENT DEBUG]', msg)
     }
   }
-  const client = new ServiceDiscovery(clientRobot)
+  const client = new DiscoveryService(clientRobot)
   client.instanceId = 'test-client-123'
   client.port = 8080 // Client port
   await client.start()
@@ -79,7 +79,7 @@ async function testReconnectionBehavior() {
   await new Promise(resolve => setTimeout(resolve, 2000))
   
   // Start a new server instance (simulating restart)
-  const newServer = new ServiceDiscovery(mockRobot)
+  const newServer = new DiscoveryService(mockRobot)
   newServer.discoveryUrl = null // Act as server
   newServer.discoveryPort = serverPort // Use same port
   await newServer.start()

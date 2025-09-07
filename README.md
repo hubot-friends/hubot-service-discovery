@@ -63,10 +63,10 @@ Then load it in your Hubot:
 
 ```javascript
 // In your hubot's main file or external-scripts.json
-import serviceDiscovery from 'hubot-service-discovery'
+import discoveryService from 'hubot-service-discovery'
 
 export default function(robot) {
-  serviceDiscovery(robot)
+  discoveryService(robot)
 }
 ```
 
@@ -335,7 +335,7 @@ data:
 ```javascript
 import WebSocket from 'ws'
 
-class ServiceDiscoveryClient {
+class DiscoveryServiceClient {
   constructor(discoveryUrl, serviceName, instanceId) {
     this.discoveryUrl = discoveryUrl
     this.serviceName = serviceName
@@ -481,7 +481,7 @@ class ServiceDiscoveryClient {
 }
 
 // Usage Example
-const client = new ServiceDiscoveryClient(
+const client = new DiscoveryServiceClient(
   'ws://localhost:3100',
   'my-service',
   'instance-1'

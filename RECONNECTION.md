@@ -2,7 +2,7 @@
 
 ## Overview
 
-The ServiceDiscoveryClient now includes robust auto-reconnection capabilities with configurable retry intervals and exponential backoff. This ensures the client maintains connectivity to the service discovery server even during network interruptions or server restarts.
+The DiscoveryServiceClient now includes robust auto-reconnection capabilities with configurable retry intervals and exponential backoff. This ensures the client maintains connectivity to the service discovery server even during network interruptions or server restarts.
 
 ## Features
 
@@ -11,7 +11,7 @@ The ServiceDiscoveryClient now includes robust auto-reconnection capabilities wi
 The client supports the following reconnection options:
 
 ```javascript
-const client = new ServiceDiscoveryClient(url, serviceName, instanceId, {
+const client = new DiscoveryServiceClient(url, serviceName, instanceId, {
   autoReconnect: true,              // Enable/disable auto-reconnection (default: true)
   reconnectInterval: 5000,          // Initial retry interval in ms (default: 5000)
   maxReconnectAttempts: 0,          // Max attempts, 0 = infinite (default: 0)
@@ -101,7 +101,7 @@ The client tracks several internal states:
 
 ### Adapter Integration
 
-The ServiceDiscoveryAdapter automatically integrates with the client's reconnection system:
+The DiscoveryServiceAdapter automatically integrates with the client's reconnection system:
 
 - Configures reconnection options from environment variables
 - Handles reconnection events for logging and monitoring
@@ -124,7 +124,7 @@ Comprehensive test coverage includes:
 
 ```javascript
 // Client with default reconnection settings
-const client = new ServiceDiscoveryClient(
+const client = new DiscoveryServiceClient(
   'ws://discovery-server:3100',
   'my-service',
   'instance-1'
@@ -138,7 +138,7 @@ await client.connect()
 
 ```javascript
 // Client with custom reconnection behavior
-const client = new ServiceDiscoveryClient(
+const client = new DiscoveryServiceClient(
   'ws://discovery-server:3100',
   'my-service',
   'instance-1',
@@ -172,7 +172,7 @@ process.env.HUBOT_DISCOVERY_MAX_RECONNECT_ATTEMPTS = '10' // 10 attempts
 
 // The adapter will automatically use these settings
 module.exports = (robot) => {
-  robot.adapter // ServiceDiscoveryAdapter with auto-reconnection configured
+  robot.adapter // DiscoveryServiceAdapter with auto-reconnection configured
 }
 ```
 

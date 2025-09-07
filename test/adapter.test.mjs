@@ -1,7 +1,7 @@
 import { test, describe, beforeEach, afterEach, mock } from 'node:test'
 import assert from 'node:assert'
 import { EventEmitter } from 'events'
-import ServiceDiscoveryAdapter from '../adapter.mjs'
+import DiscoveryServiceAdapter from '../adapter.mjs'
 
 // Mock robot for testing
 class MockRobot extends EventEmitter {
@@ -32,8 +32,8 @@ class MockRobot extends EventEmitter {
   }
 }
 
-// Mock ServiceDiscoveryClient
-class MockServiceDiscoveryClient extends EventEmitter {
+// Mock DiscoveryServiceClient
+class MockDiscoveryServiceClient extends EventEmitter {
   constructor(url, serviceName, instanceId, options) {
     super()
     this.url = url
@@ -93,7 +93,7 @@ class MockServiceDiscoveryClient extends EventEmitter {
   }
 }
 
-describe('ServiceDiscoveryAdapter', () => {
+describe('DiscoveryServiceAdapter', () => {
   let adapter
   let robot
   let originalEnv
@@ -117,8 +117,8 @@ describe('ServiceDiscoveryAdapter', () => {
       originalClient.disconnect?.()
     }
     
-    adapter = new ServiceDiscoveryAdapter(robot)
-    adapter.client = new MockServiceDiscoveryClient(
+    adapter = new DiscoveryServiceAdapter(robot)
+    adapter.client = new MockDiscoveryServiceClient(
       adapter.discoveryUrl,
       adapter.serviceName,
       adapter.instanceId,
@@ -151,7 +151,7 @@ describe('ServiceDiscoveryAdapter', () => {
     delete process.env.HUBOT_DISCOVERY_URL
     
     assert.throws(() => {
-      new ServiceDiscoveryAdapter(new MockRobot())
+      new DiscoveryServiceAdapter(new MockRobot())
     }, /HUBOT_DISCOVERY_URL is required/)
   })
 

@@ -1,7 +1,7 @@
 import { test, describe, beforeEach, afterEach, mock } from 'node:test'
 import assert from 'node:assert'
 import { EventEmitter } from 'events'
-import ServiceDiscoveryClient from '../lib/client.mjs'
+import DiscoveryServiceClient from '../lib/client.mjs'
 
 // Mock WebSocket
 class MockWebSocket extends EventEmitter {
@@ -41,11 +41,11 @@ class MockWebSocket extends EventEmitter {
   }
 }
 
-describe('ServiceDiscoveryClient', () => {
+describe('DiscoveryServiceClient', () => {
   let client
 
   beforeEach(() => {
-    client = new ServiceDiscoveryClient(
+    client = new DiscoveryServiceClient(
       'ws://localhost:3100',
       'test-service',
       'test-instance-1',
@@ -208,7 +208,7 @@ describe('ServiceDiscoveryClient', () => {
     }
     
     // Create a client with a mock WebSocket that never connects
-    const timeoutClient = new ServiceDiscoveryClient(
+    const timeoutClient = new DiscoveryServiceClient(
       'ws://localhost:9999',
       'test-service',
       'test-instance',

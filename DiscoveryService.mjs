@@ -34,7 +34,7 @@ import { TextMessage } from 'hubot'
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 
-export class ServiceDiscovery {
+export class DiscoveryService {
   constructor(robot) {
     this.robot = robot
     this.serviceName = process.env.HUBOT_SERVICE_NAME || 'hubot'
@@ -48,7 +48,7 @@ export class ServiceDiscovery {
     this.storageDir = process.env.HUBOT_DISCOVERY_STORAGE || join(process.cwd(), 'data')
     this.heartbeatTimeoutMs = parseInt(process.env.HUBOT_DISCOVERY_TIMEOUT || 30000)
     
-    // State - ServiceDiscovery is always a server
+    // State - DiscoveryService is always a server
     this.registry = null
     this.wss = null
     this.isRegistered = false
@@ -147,7 +147,7 @@ export class ServiceDiscovery {
       instanceId: this.instanceId,
       host: this.host,
       port: this.port,
-      isServer: true, // ServiceDiscovery instances are always servers
+      isServer: true, // DiscoveryService instances are always servers
       metadata: {
         adapter: this.robot.adapterName,
         brain: this.robot.brain?.constructor?.name || 'unknown',
@@ -379,7 +379,7 @@ export class ServiceDiscovery {
   }
 
   async discoverServices(serviceName = null) {
-    // ServiceDiscovery is always a server with local registry
+    // DiscoveryService is always a server with local registry
     if (serviceName) {
       return this.registry.discover(serviceName)
     } else {
@@ -435,7 +435,7 @@ export class ServiceDiscovery {
       await res.reply(`🔍 Service Discovery Status:\n${status.join('\n')}`)
     })
 
-    // Load balancing commands (always available since ServiceDiscovery is always a server)
+    // Load balancing commands (always available since DiscoveryService is always a server)
     if (this.loadBalancer) {
       // Command to show load balancer status
       this.robot.respond(/(?:load.?balancer|lb)\s+status/i, async (res) => {
@@ -579,8 +579,8 @@ export class ServiceDiscovery {
 
 export default async robot => {
   robot.parseHelp(__filename)
-  const serviceDiscovery = new ServiceDiscovery(robot)
-  robot.serviceDiscovery = serviceDiscovery
-  await serviceDiscovery.start()
-  return serviceDiscovery
+  const discoveryService = new DiscoveryService(robot)
+  robot.discoveryService = discoveryService
+  await discoveryService.start()
+  return discoveryService
 }
