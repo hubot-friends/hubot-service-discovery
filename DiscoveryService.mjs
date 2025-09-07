@@ -23,8 +23,8 @@
 // Author:
 //   Joey Guerra
 
-import EventStore from './EventStore.mjs'
-import ServiceRegistry from './ServiceRegistry.mjs'
+import EventStore from './lib/EventStore.mjs'
+import ServiceRegistry from './lib/ServiceRegistry.mjs'
 import LoadBalancer from './lib/LoadBalancer.mjs'
 import { WebSocketServer } from 'ws'
 import { fileURLToPath } from 'url'
@@ -45,7 +45,7 @@ export class DiscoveryService {
     
     // Service discovery server configuration (if this instance should run the server)
     this.discoveryPort = parseInt(process.env.HUBOT_DISCOVERY_PORT || 3100)
-    this.storageDir = process.env.HUBOT_DISCOVERY_STORAGE || join(process.cwd(), 'data')
+    this.storageDir = process.env.HUBOT_DISCOVERY_STORAGE || join(process.cwd(), '../data')
     this.heartbeatTimeoutMs = parseInt(process.env.HUBOT_DISCOVERY_TIMEOUT || 30000)
     
     // State - DiscoveryService is always a server

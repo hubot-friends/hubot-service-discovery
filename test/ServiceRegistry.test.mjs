@@ -2,7 +2,7 @@ import { test, describe, beforeEach, afterEach } from 'node:test'
 import assert from 'node:assert'
 import { existsSync, rmSync, mkdirSync } from 'fs'
 import { join } from 'path'
-import ServiceRegistry from '../ServiceRegistry.mjs'
+import ServiceRegistry from '../lib/ServiceRegistry.mjs'
 
 describe('ServiceRegistry', () => {
   let registry

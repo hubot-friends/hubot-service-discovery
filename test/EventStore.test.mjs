@@ -2,7 +2,7 @@ import { test, describe, beforeEach, afterEach } from 'node:test'
 import assert from 'node:assert'
 import { existsSync, rmSync, mkdirSync } from 'fs'
 import { join } from 'path'
-import EventStore from '../EventStore.mjs'
+import EventStore from '../lib/EventStore.mjs'
 
 describe('EventStore', () => {
   let eventStore
