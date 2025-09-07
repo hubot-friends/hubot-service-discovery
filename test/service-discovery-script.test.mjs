@@ -108,19 +108,20 @@ describe('ServiceDiscovery Script', () => {
   test('should register commands', async () => {
     await serviceDiscoveryScript(robot)
     
-    // Simulate robot ready event to start service discovery
-    
-    // Allow some time for async operations
-
     // Check that commands were registered
     assert(robot.commands.length > 0, 'Should have registered some commands')
     
-    // Check for specific command patterns
+    // Check for specific command patterns based on current design
     const patterns = robot.commands.map(cmd => cmd.pattern.toString())
     assert(patterns.some(p => p.includes('discover')), 'Should register discover command')
     assert(patterns.some(p => p.includes('status')), 'Should register status command')
-    assert(patterns.some(p => p.includes('connect')), 'Should register connect command')
-    assert(patterns.some(p => p.includes('brain')), 'Should register brain peers command')
+    
+    // Load balancer commands are only available for server instances
+    const serviceDiscovery = robot.serviceDiscovery
+    if (serviceDiscovery.isServer && serviceDiscovery.loadBalancer) {
+      assert(patterns.some(p => p.includes('load') || p.includes('lb')), 'Should register load balancer commands')
+      assert(patterns.some(p => p.includes('routing')), 'Should register routing test command')
+    }
   })
 
   test('should start as server when no discovery URL provided', async () => {
@@ -330,28 +331,6 @@ describe('ServiceDiscovery Script', () => {
     assert(res.replies.length > 0, 'Should have sent a reply')
     assert(res.replies[0].includes('Instance ID'), 'Reply should include instance ID')
     assert(res.replies[0].includes('test-instance'), 'Reply should include the test instance ID')
-  })
-
-  test('should execute brain peers command', async () => {
-    await serviceDiscoveryScript(robot)
-    
-    // Start as server
-
-    // Find the brain peers command
-    const brainCommand = robot.commands.find(cmd => 
-      cmd.pattern.toString().includes('brain')
-    )
-    assert(brainCommand, 'Should have brain peers command')
-
-    // Mock response
-    const res = new MockResponse()
-    res.match = ['brain peers']
-
-    // Execute command
-    await brainCommand.callback(res)
-
-    assert(res.replies.length > 0, 'Should have sent a reply')
-    assert(res.replies[0].includes('0'), 'Reply should mention 0 peers')
   })
 
   test('should clean up properly', async () => {

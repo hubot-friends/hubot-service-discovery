@@ -47,6 +47,8 @@ export default class ServiceDiscoveryAdapter extends Adapter {
           adapter: 'service-discovery',
           version: process.env.npm_package_version || '1.0.0',
           capabilities: ['chat', 'commands']
+        }).catch(error => {
+          this.emit('error', error)
         })
       }
       this.emit('connected')

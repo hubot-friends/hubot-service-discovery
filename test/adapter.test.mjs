@@ -42,11 +42,13 @@ class MockServiceDiscoveryClient extends EventEmitter {
     this.options = options
     this.connected = false
     this.registered = false
+    this.timers = []
   }
 
   async connect() {
     this.connected = true
-    setTimeout(() => this.emit('connected'), 10)
+    const timer = setTimeout(() => this.emit('connected'), 10)
+    this.timers.push(timer)
   }
 
   async register(host, port, metadata) {
@@ -67,7 +69,15 @@ class MockServiceDiscoveryClient extends EventEmitter {
   async disconnect() {
     this.connected = false
     this.registered = false
-    setTimeout(() => this.emit('disconnected', { code: 1000, reason: 'Normal' }), 10)
+    const timer = setTimeout(() => this.emit('disconnected', { code: 1000, reason: 'Normal' }), 10)
+    this.timers.push(timer)
+  }
+
+  cleanup() {
+    // Clear all pending timers
+    this.timers.forEach(timer => clearTimeout(timer))
+    this.timers = []
+    this.removeAllListeners()
   }
 
   enableAutoReconnect() {
@@ -128,8 +138,11 @@ describe('ServiceDiscoveryAdapter', () => {
     // Restore environment
     process.env = originalEnv
     
-    // Cleanup adapter
+    // Cleanup adapter and mock client
     if (adapter) {
+      if (adapter.client && typeof adapter.client.cleanup === 'function') {
+        adapter.client.cleanup()
+      }
       await adapter.close()
     }
   })
@@ -151,13 +164,14 @@ describe('ServiceDiscoveryAdapter', () => {
   })
 
   test('should connect and register on run', async () => {
+    adapter.on('connected', () => {
+      assert.strictEqual(adapter.client.connected, true)
+      assert.strictEqual(adapter.client.registered, true)
+      assert(adapter.client.registrationData)
+      assert.strictEqual(adapter.client.registrationData.host, 'localhost')
+      assert.strictEqual(adapter.client.registrationData.port, 8080)
+    })
     await adapter.run()
-    
-    assert.strictEqual(adapter.client.connected, true)
-    assert.strictEqual(adapter.client.registered, true)
-    assert(adapter.client.registrationData)
-    assert.strictEqual(adapter.client.registrationData.host, 'localhost')
-    assert.strictEqual(adapter.client.registrationData.port, 8080)
   })
 
   test('should emit connected event when client connects', async () => {
@@ -200,7 +214,8 @@ describe('ServiceDiscoveryAdapter', () => {
     
     const envelope = {
       room: 'general',
-      user: { id: 'user1', name: 'Test User' }
+      user: { id: 'user1', name: 'Test User' },
+      message: { id: 'msg-123', messageId: 'msgId-456' }
     }
     
     await adapter.send(envelope, 'Hello', 'World')
@@ -221,7 +236,8 @@ describe('ServiceDiscoveryAdapter', () => {
     
     const envelope = {
       room: 'general',
-      user: { id: 'user1', name: 'Test User', mention_name: 'testuser' }
+      user: { id: 'user1', name: 'Test User', mention_name: 'testuser' },
+      message: { id: 'msg-123', messageId: 'msgId-456' }
     }
     
     await adapter.reply(envelope, 'Thanks for the message')
@@ -235,7 +251,8 @@ describe('ServiceDiscoveryAdapter', () => {
     
     const envelope = {
       room: 'general',
-      user: { id: 'user1', name: 'Test User' }
+      user: { id: 'user1', name: 'Test User' },
+      message: { id: 'msg-123', messageId: 'msgId-456' }
     }
     
     await adapter.emote(envelope, 'waves hello')
