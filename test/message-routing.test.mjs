@@ -1,7 +1,7 @@
 import { test, describe, beforeEach, afterEach, mock } from 'node:test'
 import assert from 'node:assert'
 import { EventEmitter } from 'events'
-import LoadBalancer from '../lib/load-balancer.mjs'
+import LoadBalancer from '../lib/LoadBalancer.mjs'
 
 // Mock registry for testing
 class MockServiceRegistry extends EventEmitter {

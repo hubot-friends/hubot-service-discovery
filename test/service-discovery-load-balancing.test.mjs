@@ -6,7 +6,7 @@ import fs from 'fs/promises'
 import { fileURLToPath } from 'url'
 
 // Import real components instead of mocking
-import LoadBalancer from '../lib/load-balancer.mjs'
+import LoadBalancer from '../lib/LoadBalancer.mjs'
 import ServiceRegistry from '../ServiceRegistry.mjs'
 
 const __filename = fileURLToPath(import.meta.url)

@@ -1,6 +1,6 @@
 import { test, describe, beforeEach, afterEach, mock } from 'node:test'
 import assert from 'node:assert'
-import LoadBalancer from '../lib/load-balancer.mjs'
+import LoadBalancer from '../lib/LoadBalancer.mjs'
 
 describe('LoadBalancer', () => {
   let loadBalancer

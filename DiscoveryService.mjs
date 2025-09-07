@@ -25,7 +25,7 @@
 
 import EventStore from './EventStore.mjs'
 import ServiceRegistry from './ServiceRegistry.mjs'
-import LoadBalancer from './lib/load-balancer.mjs'
+import LoadBalancer from './lib/LoadBalancer.mjs'
 import { WebSocketServer } from 'ws'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
