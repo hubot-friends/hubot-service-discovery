@@ -7,7 +7,7 @@ import { fileURLToPath } from 'url'
 
 // Import real components instead of mocking
 import LoadBalancer from '../lib/load-balancer.mjs'
-import ServiceRegistry from '../service-registry.mjs'
+import ServiceRegistry from '../ServiceRegistry.mjs'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)

@@ -24,7 +24,7 @@
 //   Joey Guerra
 
 import EventStore from './event-store.mjs'
-import ServiceRegistry from './service-registry.mjs'
+import ServiceRegistry from './ServiceRegistry.mjs'
 import LoadBalancer from './lib/load-balancer.mjs'
 import { WebSocketServer } from 'ws'
 import { fileURLToPath } from 'url'
