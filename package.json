@@ -13,6 +13,13 @@
     "./lib/LoadBalancer.mjs": "./lib/LoadBalancer.mjs",
     "./lib/ServiceRegistry.mjs": "./lib/ServiceRegistry.mjs"
   },
+  "files": [
+    "index.mjs",
+    "DiscoveryService.mjs",
+    "DiscoveryServiceAdapter.mjs",
+    "lib/",
+    "README.md"
+  ],
   "scripts": {
     "test": "node --test --test-timeout=10000 test/**/*.test.mjs",
     "test:watch": "node --test --watch --test-timeout=10000 test/**/*.test.mjs",

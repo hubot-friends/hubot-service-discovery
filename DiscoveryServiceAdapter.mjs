@@ -12,7 +12,7 @@ export default class DiscoveryServiceAdapter extends Adapter {
     }
     
     this.serviceName = process.env.HUBOT_SERVICE_NAME || 'hubot'
-    this.instanceId = process.env.HUBOT_INSTANCE_ID || process.env.HOSTNAME || `hubot-${Date.now()}`
+    this.instanceId = process.env.HUBOT_INSTANCE_ID || `hubot-${Date.now()}`
     this.host = process.env.HUBOT_HOST || 'localhost'
     this.port = parseInt(process.env.HUBOT_PORT || process.env.PORT || 8080)
     

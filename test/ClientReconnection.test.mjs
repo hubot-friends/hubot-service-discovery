@@ -301,10 +301,10 @@ describe('DiscoveryServiceClient Reconnection', () => {
 
       // Simulate disconnect to trigger reconnection
       client.ws.simulateServerDisconnect()
-      await waitForEvent(client, 'disconnected')
+      await waitForEvent(client, 'disconnected', 5000)
 
       // Wait for reconnection (which should succeed)
-      await waitForEvent(client, 'connected')
+      await waitForEvent(client, 'connected', 5000)
       
       // Reconnect attempts should be reset
       assert.strictEqual(client.reconnectAttempts, 0)

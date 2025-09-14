@@ -3,7 +3,7 @@
 //
 // Configuration:
 //   HUBOT_SERVICE_NAME - Service name for registration (default: 'hubot')
-//   HUBOT_INSTANCE_ID - Unique instance identifier (default: HOSTNAME or generated)
+//   HUBOT_INSTANCE_ID - Unique instance identifier (default: generated as hubot-<Date.now()>)
 //   HUBOT_HOST - Host address for this instance (default: 'localhost')
 //   HUBOT_PORT - Port for this instance (default: 8080)
 //   HUBOT_HEARTBEAT_INTERVAL - Heartbeat interval in ms (default: 15000)
@@ -38,7 +38,7 @@ export class DiscoveryService {
   constructor(robot) {
     this.robot = robot
     this.serviceName = process.env.HUBOT_SERVICE_NAME || 'hubot'
-    this.instanceId = process.env.HUBOT_INSTANCE_ID || process.env.HOSTNAME || `hubot-${Date.now()}`
+    this.instanceId = process.env.HUBOT_INSTANCE_ID || `hubot-${Date.now()}`
     this.host = process.env.HUBOT_HOST || 'localhost'
     this.port = parseInt(process.env.HUBOT_PORT || process.env.PORT || 8080)
     this.heartbeatInterval = parseInt(process.env.HUBOT_HEARTBEAT_INTERVAL || 15000)

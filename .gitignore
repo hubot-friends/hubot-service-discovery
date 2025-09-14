@@ -10,3 +10,4 @@ test-data
 data
 external-scripts.json
 client-scripts
+.DS_Store
