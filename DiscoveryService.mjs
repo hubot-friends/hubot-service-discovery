@@ -499,21 +499,13 @@ export class DiscoveryService {
       })
 
       this.robot.receiveMiddleware(async context => {
-        if (!Array.from([/help/
-          , /test\s+routing/
-          , /discover\s+services/i
-          , /discovery\s+status/i
-          , /(?:load.?balancer|lb)\s+reset/
-          , /(?:load.?balancer|lb)\s+strategy\s+(\w+)/
-          , /(?:load.?balancer|lb)\s+status/i
-        ]).some(matcher => {
-          return matcher.test(context.response.message.text)
+        if (!this.robot.listeners.some(listener => {
+          return listener instanceof TextListener && listener.test(context.response.message)
         })) {
           this.robot.logger.debug('Routing message')
           const result = await this.routeMessage(context.response.message)
           return false
         }
-
         return true
       })
       
