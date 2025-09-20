@@ -1,59 +1,78 @@
-# Hubot Service Discovery - Quick Reference
+# Hubot Service Discovery - Quick Reference (Assuming your using @hubot-friends/hubot-slack)
 
 ## Installation
+
+Assuming you've already create a Slack app for the bot and that the bot name is `mybot`.
+
+### 1. Create a hubot instance
+
 ```sh
-npm install @hubot-friends/hubot-service-discovery
+npx hubot --create mybot
+cd mybot
+npm install @hubot-friends/hubot-service-discovery @hubot-friends/hubot-slack
 ```
 
 ## Server Instance (Chat Provider + Service Discovery Script)
 
-### 1. Add to external-scripts.json
+### 2. Secrets
+
+Create a file called `.env` and add the folowing to it:
+
+```sh
+HUBOT_SLACK_APP_TOKEN="<the Slack app token you got from creating a Slack app>"
+HUBOT_SLACK_BOT_TOKEN="<the Slack bot token>"
+```
+
+### 3. Add to external-scripts.json
 ```json
 [
-  "hubot-service-discovery/DiscoveryService.mjs"
+  "@hubot-friends/hubot-service-discovery/DiscoveryService.mjs"
 ]
 ```
 
-### 2. Start with your chat adapter
+### 4. Configure the start command
+
+Add the following to the "start" scripts in `package.json` file:
+
+```json
+{
+  "scripts": {
+    "start": "HUBOT_DISCOVERY_PORT=3100 HUBOT_SERVICE_NAME=hubot HUBOT_INSTANCE_ID=server node --env-file=.env node_modules/.bin/hubot -a @hubot-friends/hubot-slack -n mybot",
+  }
+}
+```
+
+### 5. Start with your chat adapter
+
 ```sh
-HUBOT_DISCOVERY_PORT=3100 HUBOT_SERVICE_NAME=hubot HUBOT_INSTANCE_ID=server hubot -a @hubot-friends/hubot-slack -n mybot
+npm start
 ```
 
 ## Client Instance (Service Discovery Adapter)
 
-### Start with service discovery adapter
+### 1. Create a hubot instance (a "worker" bot instance)
+
 ```sh
-HUBOT_DISCOVERY_URL=ws://server-host:3100 HUBOT_SERVICE_NAME=hubot HUBOT_INSTANCE_ID=client-1 hubot -a @hubot-friends/hubot-service-discovery  -n mybot
+npx hubot --create worker-bot
+cd worker-bot
+npm install @hubot-friends/hubot-service-discovery
 ```
 
-## Complete Example
+### 2. Configure the start command
 
-### Terminal 1 - Server
-```sh
-echo '["hubot-service-discovery/DiscoveryService.mjs"]' > external-scripts.json
+Add the following to the "start" scripts in `package.json` file:
 
-HUBOT_DISCOVERY_PORT=3100 HUBOT_SERVICE_NAME=hubot HUBOT_INSTANCE_ID=server hubot -a @hubot-friends/hubot-slack -n mybot
+**Note**: `localhost` assumes your running this on your local machine. It should be a routable name in your hosting environment.
+
+**Note**: `mybot` should be the same name you gave the server instance bot above in the Server section of this doc.
+
+```json
+{
+  "scripts": {
+    "start": "HUBOT_DISCOVERY_URL=ws://localhost:3100 HUBOT_SERVICE_NAME=hubot HUBOT_INSTANCE_ID=client-1 hubot -a @hubot-friends/hubot-service-discovery -n mybot",
+  }
+}
 ```
-
-### Terminal 2 - Client 1
-```sh
-HUBOT_DISCOVERY_URL=ws://localhost:3100 HUBOT_SERVICE_NAME=hubot HUBOT_INSTANCE_ID=client-1 HUBOT_PORT=8081 hubot -a @hubot-friends/hubot-service-discovery -n mybot
-```
-
-### Terminal 3 - Client 2
-```sh
-HUBOT_DISCOVERY_URL=ws://localhost:3100 HUBOT_SERVICE_NAME=hubot HUBOT_INSTANCE_ID=client-2 HUBOT_PORT=8082 hubot -a @hubot-friends/hubot-service-discovery -n mybot
-```
-
-## Available Commands (on server instance)
-- `@mybot discover services` - Show all registered services
-- `@mybot discovery status` - Show service discovery status
-- `@mybot help` - Displays all of the help commands that this bot knows about.
-- `@mybot help <query>` - Displays all help commands that match <query>.
-- `@mybot lb reset` - Reset round-robin counter
-- `@mybot lb strategy <strategy>` - Change load balancing strategy
-- `@mybot load balancer status` - Show load balancer statistics
-- `@mybot test routing [message]` - Test message routing
 
 ## Message Flow
 ```
