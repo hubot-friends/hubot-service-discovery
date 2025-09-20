@@ -4,6 +4,7 @@ import { EventEmitter } from 'events'
 import { existsSync, rmSync, mkdirSync } from 'fs'
 import { join } from 'path'
 import DiscoveryServiceScript from '../DiscoveryService.mjs'
+import { TextListener } from 'hubot'
 
 // Mock robot for testing
 class MockRobot extends EventEmitter {
@@ -23,21 +24,19 @@ class MockRobot extends EventEmitter {
       connectToPeer: mock.fn(),
       getPeerCount: mock.fn(() => 0)
     }
-    this.commands = []
+    this.listeners = []
   }
 
   parseHelp(fileName) {
     // Mock help parsing
   }
 
-  respond(pattern, callback) {
+  respond(regex, options, callback) {
     // Mock respond method for command registration
-    this.commands.push({ pattern, callback })
+    this.hear(regex, options, callback)
   }
-
-  hear(pattern, callback) {
-    // Mock hear method for command registration  
-    this.commands.push({ pattern, callback })
+  hear(regex, options, callback) {
+    this.listeners.push(new TextListener(this, regex, options, callback))
   }
 }
 
@@ -109,18 +108,18 @@ describe('DiscoveryService Script', () => {
     await DiscoveryServiceScript(robot)
     
     // Check that commands were registered
-    assert(robot.commands.length > 0, 'Should have registered some commands')
-    
-    // Check for specific command patterns based on current design
-    const patterns = robot.commands.map(cmd => cmd.pattern.toString())
-    assert(patterns.some(p => p.includes('discover')), 'Should register discover command')
-    assert(patterns.some(p => p.includes('status')), 'Should register status command')
-    
+    assert(robot.listeners.length > 0, 'Should have registered some commands')
+
+    // Check for specific command regexes based on current design
+    const regexes = robot.listeners.map(cmd => cmd.regex.toString())
+    assert(regexes.some(r => r.includes('discover')), 'Should register discover command')
+    assert(regexes.some(r => r.includes('status')), 'Should register status command')
+
     // Load balancer commands are always available (DiscoveryService is always a server)
     const DiscoveryService = robot.discoveryService
     if (DiscoveryService.loadBalancer) {
-      assert(patterns.some(p => p.includes('load') || p.includes('lb')), 'Should register load balancer commands')
-      assert(patterns.some(p => p.includes('routing')), 'Should register routing test command')
+      assert(regexes.some(r => r.includes('load') || r.includes('lb')), 'Should register load balancer commands')
+      assert(regexes.some(r => r.includes('routing')), 'Should register routing test command')
     }
   })
 
@@ -293,8 +292,8 @@ describe('DiscoveryService Script', () => {
     // Start as server
 
     // Find the discover command
-    const discoverCommand = robot.commands.find(cmd => 
-      cmd.pattern.toString().includes('discover')
+    const discoverCommand = robot.listeners.find(cmd => 
+      cmd.regex.toString().includes('discover')
     )
     assert(discoverCommand, 'Should have discover command')
 
@@ -315,8 +314,8 @@ describe('DiscoveryService Script', () => {
     // Start as server
 
     // Find the status command
-    const statusCommand = robot.commands.find(cmd => 
-      cmd.pattern.toString().includes('status')
+    const statusCommand = robot.listeners.find(cmd => 
+      cmd.regex.toString().includes('status')
     )
     assert(statusCommand, 'Should have status command')
 
