@@ -29,7 +29,7 @@ import LoadBalancer from './lib/LoadBalancer.mjs'
 import { WebSocketServer } from 'ws'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
-import { TextMessage } from 'hubot'
+import { TextMessage, TextListener } from 'hubot'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -500,7 +500,7 @@ export class DiscoveryService {
 
       this.robot.receiveMiddleware(async context => {
         if (!this.robot.listeners.some(listener => {
-          return listener instanceof TextListener && listener.test(context.response.message)
+          return listener instanceof TextListener && listener.matcher(context.response.message)
         })) {
           this.robot.logger.debug('Routing message')
           const result = await this.routeMessage(context.response.message)
