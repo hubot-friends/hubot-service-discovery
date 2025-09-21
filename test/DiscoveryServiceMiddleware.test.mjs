@@ -101,4 +101,15 @@ describe('Incoming Message Handling as Server', () => {
     await robot.receive(testMessage)
     assert.ok(!wasRouted)
   })
+
+  test("Route messages to workers that the Server doesn't handle", async () => {
+    await DiscoveryServiceScript(robot)
+    let wasRouted = false
+    robot.discoveryService.routeMessage = async (message) => {
+      wasRouted = true
+    }
+    const testMessage = new TextMessage({ user: { id: 'U123', name: 'tester', room: 'general' } }, '@MockityMcMockFace handled by worker', Date.now())
+    await robot.receive(testMessage)
+    assert.ok(wasRouted)
+  })
 })
