@@ -19,12 +19,14 @@ WORKER_INSTANCE_ID="${5:-client-1}"
 
 echo -e "${BLUE}🤖 Hubot Service Discovery Setup Script${NC}"
 echo -e "${BLUE}======================================${NC}"
-echo ""
+echo "Environment settings (or defaults):"
 echo -e "Bot name: ${GREEN}${BOT_NAME}${NC}"
 echo -e "Worker name: ${GREEN}${WORKER_NAME}${NC}"
 echo -e "Discovery port: ${GREEN}${DISCOVERY_PORT}${NC}"
+echo -e "Server instance ID: ${GREEN}${SERVER_INSTANCE_ID}${NC}"
+echo -e "Worker instance ID: ${GREEN}${WORKER_INSTANCE_ID}${NC}"
 echo ""
-
+    
 # Function to check if command exists
 command_exists() {
     command -v "$1" >/dev/null 2>&1
@@ -62,6 +64,7 @@ create_env_file() {
         cat > "${dir}/.env" << EOF
 HUBOT_SLACK_APP_TOKEN="${slack_app_token}"
 HUBOT_SLACK_BOT_TOKEN="${slack_bot_token}"
+HUBOT_NAME="${BOT_NAME}"
 EOF
         echo -e "${GREEN}✅ .env file created${NC}"
     else
@@ -71,6 +74,7 @@ EOF
 
 # Function to setup server instance
 setup_server() {
+    read -p "Enter your Bot name: " BOT_NAME
     echo -e "${BLUE}🖥️  Setting up Server Instance (${BOT_NAME})...${NC}"
     echo ""
     
@@ -88,6 +92,7 @@ setup_server() {
     # Install dependencies
     echo -e "${YELLOW}📦 Installing dependencies...${NC}"
     npm install @hubot-friends/hubot-service-discovery @hubot-friends/hubot-slack
+    rm -Rf scripts
     echo -e "${GREEN}✅ Dependencies installed${NC}"
     
     # Create .env file
@@ -110,7 +115,7 @@ EOF
 const fs = require('fs')
 const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'))
 pkg.scripts = pkg.scripts || {}
-pkg.scripts.start = 'HUBOT_DISCOVERY_PORT=${DISCOVERY_PORT} HUBOT_SERVICE_NAME=hubot HUBOT_INSTANCE_ID=${SERVER_INSTANCE_ID} node --env-file=.env node_modules/.bin/hubot -a @hubot-friends/hubot-slack -n ${BOT_NAME}'
+pkg.scripts.start = 'HUBOT_DISCOVERY_PORT=${DISCOVERY_PORT} HUBOT_SERVICE_NAME=hubot HUBOT_INSTANCE_ID=${SERVER_INSTANCE_ID} node --env-file=.env node_modules/.bin/hubot -a @hubot-friends/hubot-slack'
 fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2))
 "
     echo -e "${GREEN}✅ package.json start script updated${NC}"
@@ -214,9 +219,13 @@ case "${1:-}" in
 esac
 
 # Main execution
+echo -e "${YELLOW} Enter your Slack App and Bot tokens, and Bot name when prompted.${NC}"
+echo -e "${YELLOW} Make sure you have created a Slack App with the necessary permissions.${NC}"
+echo ""
+
 echo -e "${YELLOW}🔍 This script will create:${NC}"
-echo -e "  1. Server instance: ${GREEN}${BOT_NAME}${NC} (with Slack adapter + Service Discovery)"
-echo -e "  2. Worker instance: ${GREEN}${WORKER_NAME}${NC} (with Service Discovery adapter)"
+echo -e "  1. a Server instance with Slack adapter + Service Discovery"
+echo -e "  2. a Worker instance with Service Discovery adapter"
 echo ""
 
 read -p "Continue? (y/N): " -n 1 -r
