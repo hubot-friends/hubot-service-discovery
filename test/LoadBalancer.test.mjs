@@ -79,6 +79,28 @@ describe('LoadBalancer', () => {
         assert.strictEqual(instance.instanceId, 'client-1')
       }
     })
+
+    test('should reset counter when approaching MAX_SAFE_INTEGER', () => {
+      const instances = [
+        { instanceId: 'client-1' },
+        { instanceId: 'client-2' },
+        { instanceId: 'client-3' }
+      ]
+      
+      // Set counter close to MAX_SAFE_INTEGER
+      loadBalancer.roundRobinIndex = Number.MAX_SAFE_INTEGER - 1
+      
+      // Should reset and continue normally
+      const instance = loadBalancer.selectRoundRobin(instances)
+      assert(instance)
+      assert.strictEqual(instance.instanceId, 'client-1') // Starts from beginning after reset
+      assert.strictEqual(loadBalancer.roundRobinIndex, 1) // Incremented to 1 after selecting index 0
+      
+      // Next call should work normally
+      const nextInstance = loadBalancer.selectRoundRobin(instances)
+      assert.strictEqual(nextInstance.instanceId, 'client-2')
+      assert.strictEqual(loadBalancer.roundRobinIndex, 2)
+    })
   })
 
   describe('selectRandom', () => {
