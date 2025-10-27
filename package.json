@@ -1,6 +1,6 @@
 {
   "name": "@hubot-friends/hubot-service-discovery",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "description": "A Hubot script and adapter providing service discovery capabilities over WebSocket for distributed Hubot instances with horizontal scaling support",
   "main": "index.mjs",
   "type": "module",
