@@ -40,6 +40,10 @@
   ],
   "author": "Joey Guerra",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hubot-friends/hubot-service-discovery"
+  },
   "dependencies": {
     "ws": "^8.18.0"
   },
