@@ -11,3 +11,8 @@ data
 external-scripts.json
 client-scripts
 .DS_Store
+
+# allow workflow helper scripts under .github/scripts
+!.github/
+!.github/scripts/
+!.github/scripts/**
