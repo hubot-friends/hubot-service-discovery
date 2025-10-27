@@ -23,21 +23,3 @@ jobs:
         run: npm ci
       - name: Run tests
         run: npm test
-  release:
-    needs: [test]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write    
-    if: github.ref == 'refs/heads/main' && ${{ success() }}
-    steps:
-     - name: Checkout code
-       uses: actions/checkout@v4
-     - name: Use Node.js
-       uses: actions/setup-node@v4
-       with:
-        node-version: '24'
-     - name: Semantic Release
-       env:
-         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-         NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-       run: npx semantic-release
