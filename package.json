@@ -47,6 +47,9 @@
   "dependencies": {
     "ws": "^8.18.0"
   },
+  "peerDependencies": {
+    "hubot": ">=14"
+  },
   "engines": {
     "node": ">=24.0.0"
   },
