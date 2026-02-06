@@ -16,3 +16,4 @@ client-scripts
 !.github/
 !.github/scripts/
 !.github/scripts/**
+.data

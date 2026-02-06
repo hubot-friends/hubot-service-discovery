@@ -1,123 +1,171 @@
 # Hubot Service Discovery
 
-**hubot-service-discovery** is a hubot service discovery service with built-in load balancing to horizontally scale Hubot instances.
+**hubot-service-discovery** is a Hubot service discovery system with built-in load balancing and multi-group message routing to horizontally scale Hubot instances across worker groups.
 
-## Hubot Worker
+## Architecture Overview
+![](architecture-image.png)
 
-This module is a [Hubot Adapter](https://hubotio.github.io/hubot/adapters.html). If you npm install it, you would start a Hubot instance with `-a @hubot-friends/hubot-service-discovery` and it will connect to a Hubot Service Discovery Server, register itself, and listen for incoming messages. The term "Adapter" here is just the fact that this connection utlizes Hubot's Adapter design – technically speaking. So in this part of the setup, a Hubot Service Discovery Server is the message input and the Hubot Worker connects to it for it's source of messages.
+The system consists of two main components:
 
-At this point, there's no running Hubot Service Discovery Server, so this worker does nothing until a Hubot Service Discovery Server is started and getting messages from the Chat app. Referring to the right side of the diagram below, we've started a Hubot Worker # 1.
+1. **Discovery Service Server** - A Hubot instance loaded with the `DiscoveryService.mjs` script that:
+   - Connects to a chat platform (Discord, Slack, Teams, etc.)
+   - Receives messages from the chat adapter
+   - Routes messages to worker instances for processing
+   - Manages worker registration and health tracking
 
-![Architecture](architecture-image.png)
+2. **Worker Instances** - Hubot instances that:
+   - Connect to the Discovery Service via WebSocket
+   - Register themselves with a service group
+   - Receive and process routed messages
+   - Send responses back through the Discovery Service
 
-## Hubot with Chat Adapter (Adapter here refers to the adapter that connects to the chat app e.g. Discord, Slack, MS Teams)
+## Message Routing with Groups
 
-The next part of the design is the left side of the diagram above – the input.
+Worker instances are organized into **service groups**. When a message is received:
 
-This Hubot instance's role is the adapter to the chat platoform (e.g. Slack, MS Teams, Discord). You'll still start this instance with something like `hubot -a @hubot-friends/hubot-discord` because the chat platform is how users interact with Hubot – the input. But now, this Hubot instance won't have all you're command handling scripts; it'll have the [Hubot script](DiscoveryService.mjs) located in this package.
+1. The Discovery Service groups available workers by their `HUBOT_SERVICE_GROUP`
+2. One worker is selected from each group using the configured load balancing strategy
+3. The message is routed to the selected workers
+4. Each worker processes the message and sends back a response
+5. All responses are aggregated and sent back to the chat platform
 
-The steps to manually install this script is:
+This design allows you to:
+- **Scale horizontally** by adding more worker instances
+- **Organize workers logically** via groups (e.g., 'smart-features', 'basic-features', 'admin-only')
+- **Ensure fairness** - multiple workers across different groups can respond to the same message
+- **Use load balancing** - each group independently uses round-robin, random, or least-connections selection
 
-- `npm i @hubot-friends/hubot-service-discovery`
-- Add `hubot-service-discovery/DiscoveryService.mjs` to your `external-scripts.json` file
+## Setup: Discovery Service Server
 
-    ```json
-    [
-        "hubot-service-discovery/DiscoveryService.mjs"
-    ]
-    ```
+The Discovery Service Server is a Hubot instance that connects to your chat platform and routes messages to worker instances.
 
-If you want to start from scratch:
+### Installation
 
-- `cd folder-to-have-mybot` Probably use a different folder name
-- `npx hubot --create myhubot --adapter @hubot-friends/hubot-discord` Pick your adapter. Just using Discord as an example here.
-- `cd myhubot`
-- `npm i @hubot-friends/hubot-service-discovery`
-- Add `hubot-service-discovery/DiscoveryService.mjs` to your `external-scripts.json` file
+1. Create or use an existing Hubot instance with your chat adapter:
+   ```sh
+   npx hubot --create mybot --adapter @hubot-friends/hubot-discord
+   ```
 
-    ```json
-    [
-        "hubot-service-discovery/DiscoveryService.mjs"
-    ]
-    ```
+2. Install the service discovery package:
+   ```sh
+   npm i @hubot-friends/hubot-service-discovery
+   ```
 
-Now when you start the Hubot Adapter instance as shown in the diagram above, incoming chat messages will be routed through load balancing logic which picks a Hubot Worker to send the message to. This lets you scale Hubot horizontally across processes or servers while keeping the UX seamless.
+3. Add `hubot-service-discovery/DiscoveryService.mjs` to your `external-scripts.json`:
+   ```json
+   [
+       "hubot-service-discovery/DiscoveryService.mjs"
+   ]
+   ```
 
-# How do I start the Discovery Service Server?
+### Starting the Server
 
-This is the Hubot that has the chat app adapter (e.g. `@hubot-friends/hubot-discord`).
-
-```sh
-hubot -a @hubot-friends/hubot-discord -n ${NAME_OF_YOUR_HUBOT}
-```
-
-The key is that your `external-scripts.json` file contains the `DiscoveryService.mjs` script like so:
-
-```json
-[
-    "hubot-service-discovery/DiscoveryService.mjs"
-]
-```
-
-It's a little weird because this is the **server** but it's loaded as a Hubot script. That's because it's just intercepting messages from the Hubot Adapter that's connected to the chat app.
-
-# How do I start a Hubot Worker?
-
-My assumption is that this is a Git repo that contains all of your Hubot scripts (i.e. in a folder called scripts).
-
-```sh
-HUBOT_DISCOVERY_URL=ws://localhost:3100 HUBOT_SERVICE_NAME=hubot HUBOT_INSTANCE_ID=worker-1 HUBOT_HEARTBEAT_INTERVAL=15000 npm start -- --name ${NAME_OF_YOUR_HUBOT}
-```
-
-`NAME_OF_YOUR_HUBOT` is the name you gave your Hubot instance that is connected to the chat app.
-
-Say you're building a Discord bot with Hubot. You have a start task in your `package.json` file like so:
-
-```json
-{
-    "scripts": {
-        "start": "hubot --adapter @hubot-friends/hubot-discord"
-    }
-}
-```
-
-Starting the instance with: 
+Start the Hubot instance with your chat adapter. The DiscoveryService script will automatically:
+- Start a WebSocket server on `HUBOT_DISCOVERY_PORT` (default: 3100)
+- Register itself as the server instance
+- Begin accepting connections from worker instances
+- Route incoming messages to worker instances
 
 ```sh
-HUBOT_DISCOVERY_URL=ws://localhost:3100 HUBOT_SERVICE_NAME=hubot HUBOT_INSTANCE_ID=worker-1 HUBOT_HEARTBEAT_INTERVAL=15000 npm start -- --name ${NAME_OF_YOUR_HUBOT}
+HUBOT_ALLOWED_ORIGINS=http://localhost,https://yourdomain.com hubot -a @hubot-friends/hubot-discord -n mybot
 ```
 
-sets the name of your Hubot. So when you're on Discord and you want to send your Hubot a message, you'd do it like (where name is **mybot** in this example), `@mybot help`.
+## Setup: Worker Instances
 
-You might have the name set in the start script like so:
+Worker instances process messages routed from the Discovery Service. These typically contain your Hubot scripts and logic.
 
-```json
-{
-    "scripts": {
-        "start": "hubot --adapter @hubot-friends/hubot-discord --name mybot"
-    }
-}
+### Installation
+
+1. Create a Hubot instance:
+   ```sh
+   npx hubot --create mybot-worker
+   ```
+
+2. Install the service discovery package:
+   ```sh
+   npm i @hubot-friends/hubot-service-discovery
+   ```
+
+3. Set the adapter to use the DiscoveryServiceAdapter:
+   Update your `package.json` start script:
+   ```json
+   {
+       "scripts": {
+           "start": "HUBOT_DISCOVERY_URL=ws://localhost:3100 hubot -a @hubot-friends/hubot-service-discovery"
+       }
+   }
+   ```
+
+### Starting a Worker
+
+```sh
+HUBOT_DISCOVERY_URL=ws://localhost:3100 \
+HUBOT_SERVICE_NAME=hubot \
+HUBOT_SERVICE_GROUP=smart \
+HUBOT_INSTANCE_ID=worker-1 \
+npm start
 ```
 
-In which case, you wouldn't need to include the `-- --name ${NAME_OF_YOUR_HUBOT}` becasue it's already set in the start task.
+Multiple workers in the same group will rotate handling messages (via load balancing). Workers in different groups will all receive copies of messages routed to their group.
 
 
-# What are the environment variables for the Discovery Service Server?
+## Configuration
 
+### Discovery Service Server Environment Variables
+
+These variables control the server that routes messages to workers:
+
+- `HUBOT_DISCOVERY_PORT` - Port for the WebSocket server (default: 3100)
+- `HUBOT_DISCOVERY_STORAGE` - Directory to store event store data (default: ./.data). Stores snapshots plus durable events (register, deregister, expired) for crash recovery
+- `HUBOT_DISCOVERY_TIMEOUT` - Heartbeat timeout before marking worker as unhealthy (default: 30000 ms)
+- `HUBOT_LB_STRATEGY` - Load balancing strategy per group: `round-robin`, `random`, `least-connections` (default: `round-robin`)
+- `HUBOT_ALLOWED_ORIGINS` - Comma-separated list of allowed WebSocket origins (e.g., `http://localhost,https://yourdomain.com`). If not set, all origins are allowed (insecure but backward compatible)
 - `HUBOT_SERVICE_NAME` - Service name for registration (default: 'hubot')
-- `HUBOT_INSTANCE_ID` - Unique instance identifier (default: generated as hubot-<Date.now()>)
+- `HUBOT_INSTANCE_ID` - Unique instance identifier (default: generated as `hubot-<Date.now()>`)
 - `HUBOT_HOST` - Host address for this instance (default: 'localhost')
-- `HUBOT_PORT` - Port for this instance (default: 8080)
-- `HUBOT_HEARTBEAT_INTERVAL` - Heartbeat interval in ms (default: 15000)
-- `HUBOT_DISCOVERY_PORT` - Port for the discovery server (default: 3100)
-- `HUBOT_DISCOVERY_STORAGE` - Storage directory for event store (default: ./data)
-- `HUBOT_DISCOVERY_TIMEOUT` - Heartbeat timeout in ms (default: 30000)
-- `HUBOT_LB_STRATEGY` - Load balancing strategy: `round-robin`, `random`, `least-connections` (default: `round-robin`)
+- `HUBOT_PORT` - Port for HTTP server (default: 8080)
+- `HUBOT_HEARTBEAT_INTERVAL` - Heartbeat interval (default: 15000 ms)
 
-# What are the environment variables for the Hubot Worker?
+### Worker Instance Environment Variables
 
-- `HUBOT_DISCOVERY_URL` - URL of discovery server to connect to (e.g., 'ws://discovery-server:3100')
-- `HUBOT_INSTANCE_ID` - Unique instance identifier (default: hubot-{Date.now()})
+These variables control worker instances that process messages:
+
+- `HUBOT_DISCOVERY_URL` - URL of the Discovery Service (e.g., `ws://localhost:3100` or `wss://yourdomain.com:3100`)
+- `HUBOT_SERVICE_NAME` - Service name for registration (default: 'hubot')
+- `HUBOT_SERVICE_GROUP` - Worker group identifier (default: 'hubot-group'). Workers in the same group rotate handling messages. Each group independently selects one worker per message
+- `HUBOT_INSTANCE_ID` - Unique instance identifier (default: generated as `hubot-<Date.now()>`)
 - `HUBOT_HOST` - Hostname (default: localhost)
-- `HUBOT_PORT` - Port that the http server binds to (default: 8080)
+- `HUBOT_PORT` - Port for HTTP server (default: 8080)
+- `HUBOT_HEARTBEAT_INTERVAL` - Heartbeat interval (default: 15000 ms)
+- `HUBOT_DISCOVERY_RECONNECT_INTERVAL` - Time between reconnection attempts (default: 5000 ms)
+- `HUBOT_DISCOVERY_MAX_RECONNECT_ATTEMPTS` - Maximum reconnection attempts, 0 = unlimited (default: 0)
+
+## Load Balancing Strategies
+
+The load balancer selects one worker per group for each message:
+
+- **`round-robin`** (default) - Cycles through workers in the group sequentially. Each group maintains its own counter, ensuring fair distribution of messages across workers
+- **`random`** - Randomly selects a worker from each group
+- **`least-connections`** - Selects the worker with the fewest active connections (requires `connections` metadata)
+
+## How Groups Work
+
+Example scenario with 3 workers:
+- Worker 1: `HUBOT_SERVICE_GROUP=smart`
+- Worker 2: `HUBOT_SERVICE_GROUP=hubot-group` (default)
+- Worker 3: `HUBOT_SERVICE_GROUP=hubot-group` (default)
+
+When a message is received:
+1. Workers are grouped: `{ smart: [worker1], hubot-group: [worker2, worker3] }`
+2. One worker is selected per group:
+   - From "smart": worker1 is selected
+   - From "hubot-group": worker2 (or worker3, rotating)
+3. Message is routed to worker1 and worker2
+4. Both workers process the message and send responses
+5. Both responses are aggregated and sent back to the chat platform
+
+This allows you to:
+- Separate concerns (e.g., admin commands vs. user commands)
+- Scale some groups independently (more workers for high-demand groups)
+- Ensure specialized workers always see certain messages
 

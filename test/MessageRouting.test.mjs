@@ -47,54 +47,60 @@ class MessageRouter {
     try {
       // Get healthy instances from registry (simulate the new pattern)
       const healthyInstances = this.registry.getHealthyInstances('hubot')
-      const selectedInstance = this.loadBalancer.selectInstance(healthyInstances)
-      
-      if (!selectedInstance) {
-        return { 
+      const oneInstancePerGroup = Object.groupBy(healthyInstances, i => i.metadata?.group || 'default')
+
+      if (Object.keys(oneInstancePerGroup).length === 0) {
+        return [{ 
           success: false, 
           error: 'No healthy instances available',
           shouldProcessLocally: true
-        }
+        }]
       }
 
-      const workerWs = this.connectedWorkers.get(selectedInstance.instanceId)
-      
-      if (!workerWs || workerWs.readyState !== 1) {
-        return { 
-          success: false, 
-          error: 'Worker connection not available',
-          shouldProcessLocally: true
-        }
-      }
-
+      const results = []
       const messageId = `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
       messageData.messageId = messageId
+      for (const key in oneInstancePerGroup) {
+        const selectedInstance = this.loadBalancer.selectInstance(oneInstancePerGroup[key])
+        const workerWs = this.connectedWorkers.get(selectedInstance.instanceId)
+        
+        if (!workerWs || workerWs.readyState !== 1) {
+          results.push({ 
+            success: false, 
+            error: 'Worker connection not available',
+            shouldProcessLocally: true
+          })
+          continue
+        }
 
-      this.pendingResponses.set(messageId, {
-        timestamp: Date.now(),
-        originalMessage: messageData,
-        selectedInstance: selectedInstance.instanceId
-      })
 
-      const routedMessage = {
-        type: 'message',
-        data: messageData
-      }
+        this.pendingResponses.set(messageId, {
+          timestamp: Date.now(),
+          originalMessage: messageData,
+          selectedInstance: selectedInstance.instanceId
+        })
+
+        const routedMessage = {
+          type: 'message',
+          data: messageData
+        }
 
       workerWs.send(JSON.stringify(routedMessage))
-      
-      return { 
+      results.push({ 
         success: true, 
         routedTo: selectedInstance.instanceId,
         messageId: messageId
-      }
+      })
+    }
+    return results
+
       
     } catch (error) {
-      return { 
+      return [{ 
         success: false, 
         error: error.message,
         shouldProcessLocally: true
-      }
+      }]
     }
   }
 
@@ -181,9 +187,9 @@ describe('Load Balancing Message Routing', () => {
 
       const result = await messageRouter.routeMessage(messageData)
 
-      assert.strictEqual(result.success, true)
-      assert.strictEqual(result.routedTo, 'worker-1')
-      assert(result.messageId)
+      assert.strictEqual(result[0].success, true)
+      assert.strictEqual(result[0].routedTo, 'worker-1')
+      assert(result[0].messageId)
 
       // Check that message was sent to client
       assert.strictEqual(mockWs.sentMessages.length, 1)
@@ -200,9 +206,9 @@ describe('Load Balancing Message Routing', () => {
 
       const result = await messageRouter.routeMessage(messageData)
 
-      assert.strictEqual(result.success, false)
-      assert.strictEqual(result.shouldProcessLocally, true)
-      assert(result.error.includes('No healthy instances available'))
+      assert.strictEqual(result[0].success, false)
+      assert.strictEqual(result[0].shouldProcessLocally, true)
+      assert(result[0].error.includes('No healthy instances available'))
     })
 
     test('should return error when worker connection not available', async () => {
@@ -222,9 +228,9 @@ describe('Load Balancing Message Routing', () => {
 
       const result = await messageRouter.routeMessage(messageData)
 
-      assert.strictEqual(result.success, false)
-      assert.strictEqual(result.shouldProcessLocally, true)
-      assert(result.error.includes('Worker connection not available'))
+      assert.strictEqual(result[0].success, false)
+      assert.strictEqual(result[0].shouldProcessLocally, true)
+      assert(result[0].error.includes('Worker connection not available'))
     })
 
     test('should handle multiple instances with round-robin', async () => {
@@ -256,15 +262,15 @@ describe('Load Balancing Message Routing', () => {
 
       // First message should go to worker-1
       const result1 = await messageRouter.routeMessage(messageData)
-      assert.strictEqual(result1.routedTo, 'worker-1')
+      assert.strictEqual(result1[0].routedTo, 'worker-1')
 
       // Second message should go to worker-2
       const result2 = await messageRouter.routeMessage(messageData)
-      assert.strictEqual(result2.routedTo, 'worker-2')
+      assert.strictEqual(result2[0].routedTo, 'worker-2')
 
       // Third message should go back to worker-1
       const result3 = await messageRouter.routeMessage(messageData)
-      assert.strictEqual(result3.routedTo, 'worker-1')
+      assert.strictEqual(result3[0].routedTo, 'worker-1')
     })
   })
 

@@ -1,16 +1,17 @@
 // Description:
 //   Hubot service discovery script for distributed Hubot clusters
 //
-// Configuration:
+// Configuration (Discovery Service Server):
 //   HUBOT_SERVICE_NAME - Service name for registration (default: 'hubot')
 //   HUBOT_INSTANCE_ID - Unique instance identifier (default: generated as hubot-<Date.now()>)
 //   HUBOT_HOST - Host address for this instance (default: 'localhost')
 //   HUBOT_PORT - Port for this instance (default: 8080)
 //   HUBOT_HEARTBEAT_INTERVAL - Heartbeat interval in ms (default: 15000)
 //   HUBOT_DISCOVERY_PORT - Port for the discovery server (default: 3100)
-//   HUBOT_DISCOVERY_STORAGE - Storage directory for event store (default: ./data)
+//   HUBOT_DISCOVERY_STORAGE - Storage directory for event store (default: ../data from current working directory)
 //   HUBOT_DISCOVERY_TIMEOUT - Heartbeat timeout in ms (default: 30000)
 //   HUBOT_LB_STRATEGY - Load balancing strategy: round-robin, random, least-connections (default: round-robin)
+//   HUBOT_ALLOWED_ORIGINS - Comma-separated list of allowed WebSocket origins for security (default: none, allows all)
 //
 // Commands:
 //   hubot discover services - Show all registered services
@@ -91,12 +92,44 @@ export class DiscoveryService {
       logger: this.robot.logger
     })
 
+    // Configure allowed origins for WebSocket connections
+    const allowedOrigins = process.env.HUBOT_ALLOWED_ORIGINS 
+      ? process.env.HUBOT_ALLOWED_ORIGINS.split(',').map(o => o.trim())
+      : null // null means no origin validation (backward compatible but insecure)
+
     // Start WebSocket server for service discovery
-    this.wss = new WebSocketServer({ port: this.discoveryPort })
+    this.wss = new WebSocketServer({ 
+      port: this.discoveryPort,
+      verifyClient: (info, callback) => {
+        // If no allowed origins are configured, allow all connections (backward compatible)
+        if (!allowedOrigins) {
+          this.robot.logger.warn('⚠️  WebSocket origin validation is disabled. Set HUBOT_ALLOWED_ORIGINS to enable security.')
+          callback(true)
+          return
+        }
+
+        const origin = info.origin || info.req.headers.origin
+
+        // Allow connections without origin (direct WebSocket clients, not browser-based)
+        if (!origin) {
+          callback(true)
+          return
+        }
+
+        // Validate origin against allowed list
+        if (allowedOrigins.includes(origin) || allowedOrigins.includes('*')) {
+          callback(true)
+        } else {
+          this.robot.logger.warn(`❌ Rejected WebSocket connection from unauthorized origin: ${origin}`)
+          callback(false, 403, 'Forbidden: Origin not allowed')
+        }
+      }
+    })
     
     this.wss.on('connection', (ws, req) => {
       const workerId = `${req.socket.remoteAddress}:${req.socket.remotePort}`
       this.robot.logger.debug(`Discovery worker connected: ${workerId}`)
+      this.robot.logger.debug(`Currently have ${this.connectedWorkers.size} workers in connectedWorkers map`)
       
       // Store worker connection for message routing
       ws.workerId = workerId
@@ -123,6 +156,15 @@ export class DiscoveryService {
         // Remove from connected workers if it was registered
         if (ws.instanceId) {
           this.connectedWorkers.delete(ws.instanceId)
+          this.robot.logger.debug(`Removed ${ws.instanceId} from connectedWorkers. Remaining: ${this.connectedWorkers.size}`)
+        }
+
+        // Proactively deregister non-server instances on disconnect
+        if (ws.instanceId && ws.serviceName && ws.isServer !== true) {
+          this.registry.deregister(ws.serviceName, ws.instanceId)
+            .catch(error => {
+              this.robot.logger.warn(`Failed to deregister disconnected instance ${ws.instanceId}: ${error.message}`)
+            })
         }
       })
     })
@@ -167,10 +209,18 @@ export class DiscoveryService {
         await this.registry.register(message.data.serviceName, message.data)
         
         // Store worker connection for load balancing if it's not a server instance
-        if (ws && !message.data.isServer) {
+        if (ws) {
           ws.instanceId = message.data.instanceId
+          ws.serviceName = message.data.serviceName
+          ws.isServer = message.data.isServer === true
+        }
+
+        if (ws && !message.data.isServer) {
           this.connectedWorkers.set(message.data.instanceId, ws)
-          this.robot.logger.debug(`Registered worker instance for load balancing: ${message.data.instanceId}`)
+          this.robot.logger.debug(`Registered worker instance for load balancing: ${message.data.instanceId}, group: ${message.data.metadata?.group || 'default'}`)
+          this.robot.logger.debug(`connectedWorkers now has ${this.connectedWorkers.size} entries`)
+        } else if (ws && message.data.isServer) {
+          this.robot.logger.debug(`Server instance registered: ${message.data.instanceId}, NOT added to connectedWorkers`)
         }
         
         return { success: true, message: 'Service registered successfully' }
@@ -236,69 +286,106 @@ export class DiscoveryService {
 
   async routeMessage(messageData) {
     try {
-      // Get healthy instances from registry
+      // Get healthy instances from registry and ensure they are actively connected
       const healthyInstances = this.registry.getHealthyInstances(this.serviceName)
-      // Select an instance using load balancer
-      const selectedInstance = this.loadBalancer.selectInstance(healthyInstances)
-      if (!selectedInstance) {
-        this.robot.logger.warn('No healthy instances available for message routing')
-        return { 
+      this.robot.logger.debug(`Routing message: found ${healthyInstances.length} healthy instances`)
+      healthyInstances.forEach(i => {
+        this.robot.logger.debug(`  - Instance: ${i.instanceId}, Group: ${i.metadata?.group || 'default'}`)
+      })
+      
+      this.robot.logger.debug(`Routing message: connectedWorkers has ${this.connectedWorkers.size} entries`)
+      for (const [id, ws] of this.connectedWorkers.entries()) {
+        this.robot.logger.debug(`  - ConnectedWorker: ${id}, WebSocket state: ${ws?.readyState || 'unknown'}`)
+      }
+      
+      const connectedHealthyInstances = healthyInstances.filter(instance => {
+        const workerWs = this.connectedWorkers.get(instance.instanceId)
+        const isConnected = workerWs && workerWs.readyState === 1
+        if (!isConnected) {
+          this.robot.logger.debug(`  Instance ${instance.instanceId} NOT connected (found: ${!!workerWs}, readyState: ${workerWs?.readyState || 'n/a'})`)
+        }
+        return isConnected
+      })
+      this.robot.logger.debug(`Routing message: ${connectedHealthyInstances.length} instances are connected`)
+      
+      const oneInstancePerGroup = Object.groupBy(connectedHealthyInstances, i => i.metadata?.group || 'default')
+      this.robot.logger.debug(`Routing message: grouped into ${Object.keys(oneInstancePerGroup).length} groups: ${Object.keys(oneInstancePerGroup).join(', ')}`)
+
+      if (Object.keys(oneInstancePerGroup).length === 0) {
+        this.robot.logger.warn('From discovery service route message, No healthy instances available for message routing')
+        return [{ 
           success: false, 
           error: 'No healthy instances available',
-          shouldProcessLocally: true // Suggest processing locally
-        }
+          shouldProcessLocally: true, // Suggest processing locally
+          messageId: null
+        }]
       }
 
-      // Get the worker connection for the selected instance
-      const workerWs = this.connectedWorkers.get(selectedInstance.instanceId)
-      if (!workerWs || workerWs.readyState !== 1) { // 1 = WebSocket.OPEN
-        this.robot.logger.warn(`Worker connection not available for instance: ${selectedInstance.instanceId}`)
-        return { 
-          success: false, 
-          error: 'Worker connection not available',
-          shouldProcessLocally: true
-        }
-      }
-
+      const results = []
       // Generate a unique message ID for tracking responses
       const messageId = `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
       messageData.messageId = messageId
 
-      // Store the message for response tracking
-      this.pendingResponses.set(messageId, {
-        timestamp: Date.now(),
-        originalMessage: messageData,
-        selectedInstance: selectedInstance.instanceId
-      })
+      for (const key in oneInstancePerGroup) {
+        this.robot.logger.debug(`Group "${key}" has ${oneInstancePerGroup[key].length} instance(s): ${oneInstancePerGroup[key].map(i => i.instanceId).join(', ')}`)
+        const selectedInstance = this.loadBalancer.selectInstance(oneInstancePerGroup[key], key)
+        this.robot.logger.debug(`Selected instance from group "${key}": ${selectedInstance.instanceId}`)
+        const workerWs = this.connectedWorkers.get(selectedInstance.instanceId)
+        if (!workerWs || workerWs.readyState !== 1) { // 1 = WebSocket.OPEN
+          this.robot.logger.warn(`Worker connection not available for selected instance: ${selectedInstance.instanceId}`)
+          results.push({
+            success: false,
+            error: `Worker connection not available for instance: ${selectedInstance.instanceId}`,
+            shouldProcessLocally: true,
+            messageId: messageId
+          })
+          continue
+        }
 
-      // Forward the message to the selected instance
-      const routedMessage = {
-        type: 'message',
-        data: messageData
+        // Store the message for response tracking
+        // Initialize or add to existing pending response tracking (multiple instances can respond)
+        if (!this.pendingResponses.has(messageId)) {
+          this.pendingResponses.set(messageId, {
+            timestamp: Date.now(),
+            originalMessage: messageData,
+            pendingInstances: new Set(),
+            receivedResponses: new Map() // Track responses to avoid processing duplicates
+          })
+        }
+        
+        const pendingEntry = this.pendingResponses.get(messageId)
+        pendingEntry.pendingInstances.add(selectedInstance.instanceId)
+
+        // Forward the message to the selected instance
+        const routedMessage = {
+          type: 'message',
+          data: messageData
+        }
+        workerWs.send(JSON.stringify(routedMessage))
+        results.push({
+          success: true,
+          routedTo: selectedInstance.instanceId,
+          instanceId: selectedInstance.instanceId,
+          messageId: messageId
+        })
+        this.robot.logger.debug(`Message routed to instance: ${selectedInstance.instanceId}`)
       }
 
-      workerWs.send(JSON.stringify(routedMessage))
-      
-      this.robot.logger.debug(`Message routed to instance: ${selectedInstance.instanceId}`)
-      
-      return { 
-        success: true, 
-        routedTo: selectedInstance.instanceId,
-        messageId: messageId
-      }
-      
+      return results
     } catch (error) {
       this.robot.logger.error('Error routing message:', error)
-      return { 
+      return [{ 
         success: false, 
         error: error.message,
-        shouldProcessLocally: true
-      }
+        shouldProcessLocally: true,
+        messageId: null
+      }]
     }
   }
 
   handleMessageResponse(responseData) {
     const messageId = responseData.messageId
+    const instanceId = responseData.instanceId
     
     if (!messageId) {
       this.robot.logger.warn('Received message response without messageId')
@@ -312,11 +399,23 @@ export class DiscoveryService {
       return { success: false, error: 'Unknown messageId' }
     }
 
-    // Clean up pending response
-    this.pendingResponses.delete(messageId)
+    // Check if we've already processed a response from this instance
+    if (pendingMessage.receivedResponses.has(instanceId)) {
+      this.robot.logger.debug(`Already processed response from instance ${instanceId} for message ${messageId}`)
+      return { success: true, processed: true, duplicate: true }
+    }
+
+    // Mark this response as received
+    pendingMessage.receivedResponses.set(instanceId, {
+      timestamp: Date.now(),
+      data: responseData
+    })
+
+    // Remove this instance from pending
+    pendingMessage.pendingInstances.delete(instanceId)
     
     // Process the response (could forward back to chat provider, etc.)
-    this.robot.logger.debug(`Received response for message ${messageId} from instance ${pendingMessage.selectedInstance}`)
+    this.robot.logger.debug(`Received response for message ${messageId} from instance ${instanceId}. Pending: ${pendingMessage.pendingInstances.size}`)
     
     // If this server instance has a robot, emit the response
     if (this.robot && responseData.text) {
@@ -325,6 +424,12 @@ export class DiscoveryService {
       
       // Send the response through the robot (this will go to the chat provider)
       this.robot.messageRoom(responseData.room || 'general', responseData.text)
+    }
+    
+    // Only clean up the messageId entry if all instances have responded
+    if (pendingMessage.pendingInstances.size === 0) {
+      this.pendingResponses.delete(messageId)
+      this.robot.logger.debug(`All responses received for message ${messageId}. Cleaned up pending entry.`)
     }
     
     return { success: true, processed: true }
@@ -372,7 +477,9 @@ export class DiscoveryService {
     
     for (const [messageId, pendingMessage] of this.pendingResponses.entries()) {
       if (now - pendingMessage.timestamp > timeout) {
-        this.robot.logger.warn(`Cleaning up expired pending response: ${messageId}`)
+        const pendingCount = pendingMessage.pendingInstances.size
+        const receivedCount = pendingMessage.receivedResponses.size
+        this.robot.logger.warn(`Cleaning up expired pending response: ${messageId} (received ${receivedCount}/${receivedCount + pendingCount} responses)`)
         this.pendingResponses.delete(messageId)
       }
     }
@@ -480,6 +587,10 @@ export class DiscoveryService {
         await res.reply('✅ Round-robin counter reset')
       })
 
+      this.robot.respond(/check all workers/i, async res => {
+
+      })
+
       // Command to test message routing
       this.robot.respond(/test\s+routing(?:\s+(.+))?/i, async (res) => {
         const testMessage = res.match[1] || 'Test message'
@@ -498,11 +609,13 @@ export class DiscoveryService {
         }
       })
 
+      // This is where the incoming message from the chat provider is intercepted.
       this.robot.receiveMiddleware(async context => {
         if (!this.robot.listeners.some(listener => {
           return listener instanceof TextListener && listener.matcher(context.response.message)
         })) {
           this.robot.logger.debug('Routing message')
+          // The message journey begins here.
           const result = await this.routeMessage(context.response.message)
           return false
         }

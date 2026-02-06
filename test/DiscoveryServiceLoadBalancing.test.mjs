@@ -4,6 +4,8 @@ import { EventEmitter } from 'events'
 import path from 'path'
 import fs from 'fs/promises'
 import { fileURLToPath } from 'url'
+import DiscoveryServiceFunction from '../DiscoveryService.mjs'
+
 
 // Import real components instead of mocking
 import LoadBalancer from '../lib/LoadBalancer.mjs'
@@ -89,7 +91,6 @@ describe('DiscoveryService Load Balancing Integration', () => {
     mockRobot.parseHelp = mock.fn() // Add missing parseHelp method
     
     // Import and create DiscoveryService, but stop it first to clean up any auto-started services
-    const DiscoveryServiceFunction = (await import('../DiscoveryService.mjs')).default
     DiscoveryService = await DiscoveryServiceFunction(mockRobot)
     
     // Stop the auto-started service discovery to clean up timers/servers
@@ -182,10 +183,9 @@ describe('DiscoveryService Load Balancing Integration', () => {
       }
 
       const result = await DiscoveryService.routeMessage(messageData)
-
-      assert.strictEqual(result.success, true)
-      assert.strictEqual(result.routedTo, 'worker-1')
-      assert(result.messageId)
+      assert.strictEqual(result[0].success, true)
+      assert.strictEqual(result[0].routedTo, 'worker-1')
+      assert(result[0].messageId)
 
       // Check that message was sent to client
       assert.strictEqual(mockWs.sentMessages.length, 1)
@@ -202,9 +202,9 @@ describe('DiscoveryService Load Balancing Integration', () => {
 
       const result = await DiscoveryService.routeMessage(messageData)
 
-      assert.strictEqual(result.success, false)
-      assert.strictEqual(result.shouldProcessLocally, true)
-      assert(result.error.includes('No healthy instances available') || result.error.includes('Worker connection not available'))
+      assert.strictEqual(result[0].success, false)
+      assert.strictEqual(result[0].shouldProcessLocally, true)
+      assert(result[0].error.includes('No healthy instances available') || result[0].error.includes('Worker connection not available'))
     })
 
     test('should return error when worker connection not available', async () => {
@@ -228,9 +228,38 @@ describe('DiscoveryService Load Balancing Integration', () => {
 
       const result = await DiscoveryService.routeMessage(messageData)
 
-      assert.strictEqual(result.success, false)
-      assert.strictEqual(result.shouldProcessLocally, true)
-      assert(result.error.includes('Worker connection not available'))
+      assert.strictEqual(result[0].success, false)
+      assert.strictEqual(result[0].shouldProcessLocally, true)
+      assert(result[0].error.includes('No healthy instances available'))
+    })
+
+    test('should not route to instances with closed sockets', async () => {
+      await DiscoveryService.registry.register('hubot', {
+        instanceId: 'worker-1',
+        host: 'localhost',
+        port: 8081,
+        isServer: false,
+        metadata: { adapter: 'test' }
+      })
+
+      await DiscoveryService.registry.heartbeat('hubot', 'worker-1')
+
+      const mockWs = new MockWebSocket()
+      mockWs.readyState = 3 // CLOSED
+      DiscoveryService.connectedWorkers.set('worker-1', mockWs)
+
+      const messageData = {
+        user: { id: 'user1', name: 'Test User' },
+        text: 'Hello world',
+        room: 'general'
+      }
+
+      const result = await DiscoveryService.routeMessage(messageData)
+
+      assert.strictEqual(result[0].success, false)
+      assert.strictEqual(result[0].shouldProcessLocally, true)
+      assert(result[0].error.includes('No healthy instances available'))
+      assert.strictEqual(mockWs.sentMessages.length, 0)
     })
 
     test('should handle multiple instances with round-robin', async () => {
@@ -294,15 +323,57 @@ describe('DiscoveryService Load Balancing Integration', () => {
 
       // First message should go to first client instance
       const result1 = await DiscoveryService.routeMessage(messageData)
-      assert.strictEqual(result1.routedTo, expectedFirst)
+      assert.strictEqual(result1[0].routedTo, expectedFirst)
 
       // Second message should go to second client instance  
       const result2 = await DiscoveryService.routeMessage(messageData)
-      assert.strictEqual(result2.routedTo, expectedSecond)
-
+      assert.strictEqual(result2[0].routedTo, expectedSecond)
       // Third message should go back to first client instance (round-robin)
       const result3 = await DiscoveryService.routeMessage(messageData)
-      assert.strictEqual(result3.routedTo, expectedFirst)
+      assert.strictEqual(result3[0].routedTo, expectedFirst)
+    })
+
+    test('should get 1 healthy instance for every group of server/client instances', async () => {
+      // Register server and client instances
+      await DiscoveryService.registry.register('hubot', {
+        instanceId: 'server-1',
+        host: 'localhost',
+        port: 8080,
+        isServer: true,
+        metadata: { adapter: 'test', isServer: true }
+      })
+      await DiscoveryService.registry.register('hubot', {
+        instanceId: 'worker-1',
+        host: 'localhost',
+        port: 8081,
+        isServer: false,
+        metadata: { adapter: 'test', isServer: false, group: 'A' }
+      })
+      await DiscoveryService.registry.register('hubot', {
+        instanceId: 'worker-2',
+        host: 'localhost',
+        port: 8082,
+        isServer: true,
+        metadata: { adapter: 'test', isServer: true, group: 'A' }
+      })
+      await DiscoveryService.registry.register('hubot', {
+        instanceId: 'worker-3',
+        host: 'localhost',
+        port: 8083,
+        isServer: false,
+        metadata: { adapter: 'test', isServer: false, group: 'B' }
+      })
+
+      // Send initial heartbeats to make instances healthy
+      await DiscoveryService.registry.heartbeat('hubot', 'server-1')
+      await DiscoveryService.registry.heartbeat('hubot', 'worker-1')
+      await DiscoveryService.registry.heartbeat('hubot', 'worker-2')
+      await DiscoveryService.registry.heartbeat('hubot', 'worker-3')
+
+      const healthyInstances = Object.groupBy(DiscoveryService.registry.getHealthyInstances('hubot'), i => i.metadata?.group || 'default')
+      assert.strictEqual(healthyInstances['A'].length, 1)
+      assert.strictEqual(healthyInstances['B'].length, 1)
+      assert.strictEqual(healthyInstances['B'][0].instanceId, 'worker-3')
     })
   })
 
@@ -330,16 +401,19 @@ describe('DiscoveryService Load Balancing Integration', () => {
 
     test('should handle message response successfully', async () => {
       const messageId = 'test-msg-123'
+      const instanceId = 'worker-1'
       
-      // Add pending response
+      // Add pending response with new structure
       DiscoveryService.pendingResponses.set(messageId, {
         timestamp: Date.now(),
         originalMessage: { text: 'Hello' },
-        selectedInstance: 'worker-1'
+        pendingInstances: new Set([instanceId]),
+        receivedResponses: new Map()
       })
 
       const responseData = {
         messageId: messageId,
+        instanceId: instanceId,
         text: 'Hello back!',
         room: 'general',
         user: { id: 'bot', name: 'Hubot' }
@@ -350,7 +424,7 @@ describe('DiscoveryService Load Balancing Integration', () => {
       assert.strictEqual(result.success, true)
       assert.strictEqual(result.processed, true)
 
-      // Check that pending response was cleaned up
+      // Check that pending response was cleaned up (since all instances have responded)
       assert.strictEqual(DiscoveryService.pendingResponses.has(messageId), false)
 
       // Check that response was sent through robot
@@ -389,16 +463,18 @@ describe('DiscoveryService Load Balancing Integration', () => {
       const now = Date.now()
       const oldTime = now - 60000 // 60 seconds ago
 
-      // Add some pending responses
+      // Add some pending responses with new structure
       DiscoveryService.pendingResponses.set('fresh-msg', {
         timestamp: now,
         originalMessage: { text: 'Fresh' },
-        selectedInstance: 'worker-1'
+        pendingInstances: new Set(['worker-1']),
+        receivedResponses: new Map()
       })
       DiscoveryService.pendingResponses.set('old-msg', {
         timestamp: oldTime,
         originalMessage: { text: 'Old' },
-        selectedInstance: 'worker-1'
+        pendingInstances: new Set(['worker-1']),
+        receivedResponses: new Map()
       })
 
       assert.strictEqual(DiscoveryService.pendingResponses.size, 2)

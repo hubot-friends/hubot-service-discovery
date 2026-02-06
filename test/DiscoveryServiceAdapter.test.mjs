@@ -228,7 +228,7 @@ describe('DiscoveryServiceAdapter', () => {
     const messageData = adapter.client.lastSentMessage.data
     assert.strictEqual(messageData.text, 'World')
     assert.strictEqual(messageData.room, 'general')
-    assert.strictEqual(messageData.sourceInstance, 'test-instance')
+    assert.strictEqual(messageData.instanceId, 'test-instance')
   })
 
   test('should handle replies with mentions', async () => {

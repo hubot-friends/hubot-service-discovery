@@ -246,4 +246,143 @@ describe('LoadBalancer', () => {
       assert(instance) // Should select an instance
     })
   })
+
+  describe('Per-group round-robin', () => {
+    const groupAInstances = [
+      { instanceId: 'group-a-1' },
+      { instanceId: 'group-a-2' }
+    ]
+    const groupBInstances = [
+      { instanceId: 'group-b-1' },
+      { instanceId: 'group-b-2' },
+      { instanceId: 'group-b-3' }
+    ]
+
+    test('should maintain separate round-robin indices per group', () => {
+      // Select from group A
+      assert.strictEqual(loadBalancer.selectInstance(groupAInstances, 'groupA').instanceId, 'group-a-1')
+      assert.strictEqual(loadBalancer.selectInstance(groupAInstances, 'groupA').instanceId, 'group-a-2')
+      
+      // Select from group B
+      assert.strictEqual(loadBalancer.selectInstance(groupBInstances, 'groupB').instanceId, 'group-b-1')
+      assert.strictEqual(loadBalancer.selectInstance(groupBInstances, 'groupB').instanceId, 'group-b-2')
+      
+      // Back to group A - should continue where we left off
+      assert.strictEqual(loadBalancer.selectInstance(groupAInstances, 'groupA').instanceId, 'group-a-1')
+      
+      // Back to group B - should continue where we left off
+      assert.strictEqual(loadBalancer.selectInstance(groupBInstances, 'groupB').instanceId, 'group-b-3')
+    })
+
+    test('should wrap around correctly for each group', () => {
+      // Select twice from group B to cycle through all
+      loadBalancer.selectInstance(groupBInstances, 'groupB') // index 0
+      loadBalancer.selectInstance(groupBInstances, 'groupB') // index 1
+      loadBalancer.selectInstance(groupBInstances, 'groupB') // index 2
+      
+      // Next should wrap to 0
+      assert.strictEqual(loadBalancer.selectInstance(groupBInstances, 'groupB').instanceId, 'group-b-1')
+    })
+
+    test('should handle multiple groups independently', () => {
+      const groupCInstances = [{ instanceId: 'group-c-1' }]
+      
+      // Select from all three groups in mixed order
+      assert.strictEqual(loadBalancer.selectInstance(groupAInstances, 'groupA').instanceId, 'group-a-1')
+      assert.strictEqual(loadBalancer.selectInstance(groupCInstances, 'groupC').instanceId, 'group-c-1')
+      assert.strictEqual(loadBalancer.selectInstance(groupBInstances, 'groupB').instanceId, 'group-b-1')
+      assert.strictEqual(loadBalancer.selectInstance(groupAInstances, 'groupA').instanceId, 'group-a-2')
+      assert.strictEqual(loadBalancer.selectInstance(groupBInstances, 'groupB').instanceId, 'group-b-2')
+      assert.strictEqual(loadBalancer.selectInstance(groupCInstances, 'groupC').instanceId, 'group-c-1')
+    })
+
+    test('should reset per-group index when specified', () => {
+      // Advance group A
+      loadBalancer.selectInstance(groupAInstances, 'groupA')
+      loadBalancer.selectInstance(groupAInstances, 'groupA')
+      
+      // Advance group B
+      loadBalancer.selectInstance(groupBInstances, 'groupB')
+      loadBalancer.selectInstance(groupBInstances, 'groupB')
+      
+      // Reset only group A
+      loadBalancer.resetRoundRobin('groupA')
+      
+      // Group A should restart
+      assert.strictEqual(loadBalancer.selectInstance(groupAInstances, 'groupA').instanceId, 'group-a-1')
+      
+      // Group B should continue where it left off
+      assert.strictEqual(loadBalancer.selectInstance(groupBInstances, 'groupB').instanceId, 'group-b-3')
+    })
+
+    test('should reset all group indices when no group specified', () => {
+      // Advance both groups
+      loadBalancer.selectInstance(groupAInstances, 'groupA')
+      loadBalancer.selectInstance(groupBInstances, 'groupB')
+      
+      // Reset all
+      loadBalancer.resetRoundRobin()
+      
+      // Both should restart
+      assert.strictEqual(loadBalancer.selectInstance(groupAInstances, 'groupA').instanceId, 'group-a-1')
+      assert.strictEqual(loadBalancer.selectInstance(groupBInstances, 'groupB').instanceId, 'group-b-1')
+    })
+  })
+
+  describe('Random strategy with groups', () => {
+    const groupAInstances = [
+      { instanceId: 'group-a-1' },
+      { instanceId: 'group-a-2' }
+    ]
+    const groupBInstances = [
+      { instanceId: 'group-b-1' },
+      { instanceId: 'group-b-2' }
+    ]
+
+    beforeEach(() => {
+      loadBalancer.setStrategy('random')
+    })
+
+    test('should select random instance from group regardless of groupId', () => {
+      const groupAId = loadBalancer.selectInstance(groupAInstances, 'groupA').instanceId
+      assert(['group-a-1', 'group-a-2'].includes(groupAId))
+      
+      const groupBId = loadBalancer.selectInstance(groupBInstances, 'groupB').instanceId
+      assert(['group-b-1', 'group-b-2'].includes(groupBId))
+    })
+
+    test('should work without groupId for random strategy', () => {
+      const instance = loadBalancer.selectInstance(groupAInstances)
+      assert(['group-a-1', 'group-a-2'].includes(instance.instanceId))
+    })
+  })
+
+  describe('Least-connections strategy with groups', () => {
+    const groupAInstances = [
+      { instanceId: 'group-a-1', metadata: { connections: 5 } },
+      { instanceId: 'group-a-2', metadata: { connections: 2 } }
+    ]
+    const groupBInstances = [
+      { instanceId: 'group-b-1', metadata: { connections: 3 } },
+      { instanceId: 'group-b-2', metadata: { connections: 1 } }
+    ]
+
+    beforeEach(() => {
+      loadBalancer.setStrategy('least-connections')
+    })
+
+    test('should select instance with least connections per group', () => {
+      const groupAInstance = loadBalancer.selectInstance(groupAInstances, 'groupA')
+      assert.strictEqual(groupAInstance.instanceId, 'group-a-2') // Has 2 connections
+      
+      const groupBInstance = loadBalancer.selectInstance(groupBInstances, 'groupB')
+      assert.strictEqual(groupBInstance.instanceId, 'group-b-2') // Has 1 connection
+    })
+
+    test('should ignore groupId for least-connections strategy', () => {
+      // groupId should be ignored for least-connections
+      const instance = loadBalancer.selectInstance(groupAInstances, 'anyGroupId')
+      assert.strictEqual(instance.instanceId, 'group-a-2')
+    })
+  })
 })

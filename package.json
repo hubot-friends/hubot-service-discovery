@@ -24,7 +24,7 @@
     "test": "node --test --test-timeout=10000 test/**/*.test.mjs",
     "test:watch": "node --test --watch --test-timeout=10000 test/**/*.test.mjs",
     "test:coverage": "node --test --experimental-test-coverage --test-timeout=10000 test/**/*.test.mjs",
-    "start": "hubot -n Hubot",
+    "start": "HUBOT_ALLOWED_ORIGINS=localhost hubot -n Hubot",
     "start-client": "HUBOT_DISCOVERY_URL='ws://localhost:3100' HUBOT_SERVICE_NAME=hubot HUBOT_INSTANCE_ID=client-1 node --watch local-client.mjs"
   },
   "keywords": [
@@ -46,12 +46,6 @@
   },
   "dependencies": {
     "ws": "^8.18.0"
-  },
-  "peerDependencies": {
-    "hubot": ">13.0.0"
-  },
-  "devDependencies": {
-    "hubot": ">13.0.0"
   },
   "engines": {
     "node": ">=24.0.0"

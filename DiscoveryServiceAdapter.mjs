@@ -12,10 +12,11 @@ export default class DiscoveryServiceAdapter extends Adapter {
     }
     
     this.serviceName = process.env.HUBOT_SERVICE_NAME || 'hubot'
+    this.group = process.env.HUBOT_SERVICE_GROUP || 'hubot-group'
     this.instanceId = process.env.HUBOT_INSTANCE_ID || `hubot-${Date.now()}`
     this.host = process.env.HUBOT_HOST || 'localhost'
     this.port = parseInt(process.env.HUBOT_PORT || process.env.PORT || 8080)
-    
+
     // Initialize client
     this.client = new DiscoveryServiceClient(
       this.discoveryUrl,
@@ -24,6 +25,7 @@ export default class DiscoveryServiceAdapter extends Adapter {
       {
         host: this.host,
         port: this.port,
+        headers: process.env.HUBOT_DISCOVERY_HEADERS ? JSON.parse(process.env.HUBOT_DISCOVERY_HEADERS) : {},
         heartbeatInterval: parseInt(process.env.HUBOT_HEARTBEAT_INTERVAL || 15000),
         autoReconnect: true, // Enable auto-reconnection
         reconnectInterval: parseInt(process.env.HUBOT_DISCOVERY_RECONNECT_INTERVAL || 5000),
@@ -45,6 +47,7 @@ export default class DiscoveryServiceAdapter extends Adapter {
       if(!this.client.registered) {
         this.client.register(this.host, this.port, {
           adapter: 'service-discovery',
+          group: this.group,
           version: process.env.npm_package_version || '1.0.0',
           capabilities: ['chat', 'commands']
         }).catch(error => {
@@ -79,7 +82,7 @@ export default class DiscoveryServiceAdapter extends Adapter {
       // Connect to service discovery
       await this.client.connect()
 
-      this.robot.logger.info(`Service discovery adapter registered as ${this.instanceId}`)
+      this.robot.logger.info(`Service discovery adapter registered as client instance id = ${this.instanceId}`)
       
       // The 'connected' event is emitted by the client when connection is established
     } catch (error) {
@@ -110,7 +113,7 @@ export default class DiscoveryServiceAdapter extends Adapter {
           user: envelope.user,
           text: str,
           timestamp: Date.now(),
-          sourceInstance: this.instanceId,
+          instanceId: this.instanceId,
           id: envelope.message.id,
           messageId: envelope.message.messageId
         }
@@ -147,7 +150,7 @@ export default class DiscoveryServiceAdapter extends Adapter {
         topic: str,
         user: envelope.user,
         timestamp: Date.now(),
-        sourceInstance: this.instanceId
+        instanceId: this.instanceId
       }
       
       await this.client.sendMessage({
