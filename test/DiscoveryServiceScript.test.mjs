@@ -25,6 +25,11 @@ class MockRobot extends EventEmitter {
       getPeerCount: mock.fn(() => 0)
     }
     this.listeners = []
+    // Add commands registry for new command pattern
+    this.commands = new Map()
+    this.commands.register = (commandDefinition) => {
+      this.commands.set(commandDefinition.id, commandDefinition)
+    }
   }
 
   parseHelp(fileName) {
@@ -107,19 +112,22 @@ describe('DiscoveryService Script', () => {
   test('should register commands', async () => {
     await DiscoveryServiceScript(robot)
     
-    // Check that commands were registered
-    assert(robot.listeners.length > 0, 'Should have registered some commands')
+    // Check that commands were registered using new command pattern
+    assert(robot.commands, 'Should have commands registry')
+    const commandIds = Array.from(robot.commands.keys())
+    assert(commandIds.length > 0, 'Should have registered some commands')
 
-    // Check for specific command regexes based on current design
-    const regexes = robot.listeners.map(cmd => cmd.regex.toString())
-    assert(regexes.some(r => r.includes('discover')), 'Should register discover command')
-    assert(regexes.some(r => r.includes('status')), 'Should register status command')
+    // Check for specific commands
+    assert(commandIds.includes('discovery.discover'), 'Should register discover command')
+    assert(commandIds.includes('discovery.status'), 'Should register status command')
 
     // Load balancer commands are always available (DiscoveryService is always a server)
     const DiscoveryService = robot.discoveryService
     if (DiscoveryService.loadBalancer) {
-      assert(regexes.some(r => r.includes('load') || r.includes('lb')), 'Should register load balancer commands')
-      assert(regexes.some(r => r.includes('routing')), 'Should register routing test command')
+      assert(commandIds.includes('discovery.lb.status'), 'Should register lb status command')
+      assert(commandIds.includes('discovery.lb.strategy'), 'Should register lb strategy command')
+      assert(commandIds.includes('discovery.lb.reset'), 'Should register lb reset command')
+      assert(commandIds.includes('discovery.test.routing'), 'Should register routing test command')
     }
   })
 
@@ -289,46 +297,42 @@ describe('DiscoveryService Script', () => {
   test('should execute discover services command', async () => {
     await DiscoveryServiceScript(robot)
     
-    // Start as server
-
     // Find the discover command
-    const discoverCommand = robot.listeners.find(cmd => 
-      cmd.regex.toString().includes('discover')
-    )
+    const discoverCommand = robot.commands.get('discovery.discover')
     assert(discoverCommand, 'Should have discover command')
 
-    // Mock response
-    const res = new MockResponse()
-    res.match = ['discover services', 'services']
+    // Create a mock context for the new command pattern
+    const mockContext = {
+      args: {},
+      message: { room: 'test-room' }
+    }
 
     // Execute command
-    await discoverCommand.callback(res)
+    const result = await discoverCommand.handler(mockContext)
 
-    assert(res.replies.length > 0, 'Should have sent a reply')
-    assert(res.replies[0].includes('services'), 'Reply should mention services')
+    assert(result, 'Should return a result')
+    assert(result.includes('services'), 'Result should mention services')
   })
 
   test('should execute discovery status command', async () => {
     await DiscoveryServiceScript(robot)
     
-    // Start as server
-
     // Find the status command
-    const statusCommand = robot.listeners.find(cmd => 
-      cmd.regex.toString().includes('status')
-    )
+    const statusCommand = robot.commands.get('discovery.status')
     assert(statusCommand, 'Should have status command')
 
-    // Mock response
-    const res = new MockResponse()
-    res.match = ['discovery status']
+    // Create a mock context for the new command pattern
+    const mockContext = {
+      args: {},
+      message: { room: 'test-room' }
+    }
 
     // Execute command
-    await statusCommand.callback(res)
+    const result = await statusCommand.handler(mockContext)
 
-    assert(res.replies.length > 0, 'Should have sent a reply')
-    assert(res.replies[0].includes('Instance ID'), 'Reply should include instance ID')
-    assert(res.replies[0].includes('test-instance'), 'Reply should include the test instance ID')
+    assert(result, 'Should return a result')
+    assert(result.includes('Instance ID'), 'Result should include instance ID')
+    assert(result.includes('test-instance'), 'Result should include the test instance ID')
   })
 
   test('should clean up properly', async () => {
