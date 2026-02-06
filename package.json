@@ -24,8 +24,9 @@
     "test": "node --test --test-timeout=10000 test/**/*.test.mjs",
     "test:watch": "node --test --watch --test-timeout=10000 test/**/*.test.mjs",
     "test:coverage": "node --test --experimental-test-coverage --test-timeout=10000 test/**/*.test.mjs",
-    "start": "HUBOT_ALLOWED_ORIGINS=localhost hubot -n Hubot",
-    "start-client": "HUBOT_DISCOVERY_URL='ws://localhost:3100' HUBOT_SERVICE_NAME=hubot HUBOT_INSTANCE_ID=client-1 node --watch local-client.mjs"
+    "start": "HUBOT_ALLOWED_ORIGINS='http://localhost:8080,localhost' hubot -n Hubot",
+    "start-client": "HUBOT_DISCOVERY_URL='ws://localhost:3100' HUBOT_SERVICE_NAME=hubot HUBOT_INSTANCE_ID=client-1 node --watch local-client.mjs",
+    "generate-token": "node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\""
   },
   "keywords": [
     "hubot",

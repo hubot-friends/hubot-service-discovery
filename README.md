@@ -119,7 +119,11 @@ These variables control the server that routes messages to workers:
 - `HUBOT_DISCOVERY_STORAGE` - Directory to store event store data (default: ./.data). Stores snapshots plus durable events (register, deregister, expired) for crash recovery
 - `HUBOT_DISCOVERY_TIMEOUT` - Heartbeat timeout before marking worker as unhealthy (default: 30000 ms)
 - `HUBOT_LB_STRATEGY` - Load balancing strategy per group: `round-robin`, `random`, `least-connections` (default: `round-robin`)
-- `HUBOT_ALLOWED_ORIGINS` - Comma-separated list of allowed WebSocket origins (e.g., `http://localhost,https://yourdomain.com`). If not set, all origins are allowed (insecure but backward compatible)
+- `HUBOT_ALLOWED_ORIGINS` - Comma-separated list of allowed WebSocket origins (e.g., `http://localhost,https://yourdomain.com`). Only validated for browser connections. If not set, all origins are allowed (insecure but backward compatible)
+- `HUBOT_DISCOVERY_TOKEN` - Shared secret token for authentication. If set, all clients must provide this token (recommended for production)
+- `HUBOT_MAX_CONNECTIONS_PER_IP` - Maximum simultaneous connections per IP address (default: 5)
+- `HUBOT_RATE_LIMIT_MAX_ATTEMPTS` - Maximum connection attempts per rate limit window (default: 10)
+- `HUBOT_RATE_LIMIT_WINDOW_MS` - Rate limit window in milliseconds (default: 60000 = 1 minute)
 - `HUBOT_SERVICE_NAME` - Service name for registration (default: 'hubot')
 - `HUBOT_INSTANCE_ID` - Unique instance identifier (default: generated as `hubot-<Date.now()>`)
 - `HUBOT_HOST` - Host address for this instance (default: 'localhost')
@@ -139,6 +143,7 @@ These variables control worker instances that process messages:
 - `HUBOT_HEARTBEAT_INTERVAL` - Heartbeat interval (default: 15000 ms)
 - `HUBOT_DISCOVERY_RECONNECT_INTERVAL` - Time between reconnection attempts (default: 5000 ms)
 - `HUBOT_DISCOVERY_MAX_RECONNECT_ATTEMPTS` - Maximum reconnection attempts, 0 = unlimited (default: 0)
+- `HUBOT_DISCOVERY_TOKEN` - Shared secret token for authentication (optional, but recommended)
 
 ## Load Balancing Strategies
 
@@ -147,6 +152,79 @@ The load balancer selects one worker per group for each message:
 - **`round-robin`** (default) - Cycles through workers in the group sequentially. Each group maintains its own counter, ensuring fair distribution of messages across workers
 - **`random`** - Randomly selects a worker from each group
 - **`least-connections`** - Selects the worker with the fewest active connections (requires `connections` metadata)
+
+## Security Configuration
+
+The discovery service includes multiple security layers to prevent unauthorized access:
+
+### Shared Secret Token Authentication
+
+Require all clients to provide a valid token when connecting. This is the primary defense against unauthorized access.
+
+**Server Configuration:**
+```bash
+export HUBOT_DISCOVERY_TOKEN='your-secret-token-here'
+```
+
+**Worker Clients:**
+```bash
+export HUBOT_DISCOVERY_TOKEN='your-secret-token-here'
+```
+
+**Browser Console:**
+Enter the token in the "Auth Token" field before connecting.
+
+### Origin Validation
+
+For browser-based connections, validate the WebSocket origin header to prevent cross-site attacks:
+
+```bash
+# Allow specific origins
+export HUBOT_ALLOWED_ORIGINS='http://localhost:8080,https://yourdomain.com'
+
+# Allow all origins (not recommended)
+export HUBOT_ALLOWED_ORIGINS='*'
+```
+
+**Note:** Direct WebSocket clients (Node.js, CLI) are allowed regardless of origin validation — only browser-based connections are validated.
+
+### Rate Limiting
+
+Limit the number of connection attempts per IP address to prevent brute force attacks:
+
+```bash
+# Maximum connection attempts per IP per window (default: 10)
+export HUBOT_RATE_LIMIT_MAX_ATTEMPTS=10
+
+# Rate limit window in milliseconds (default: 60000 = 1 minute)
+export HUBOT_RATE_LIMIT_WINDOW_MS=60000
+```
+
+### Connection Limits Per IP
+
+Restrict the number of simultaneous connections from a single IP address:
+
+```bash
+# Maximum concurrent connections per IP (default: 5)
+export HUBOT_MAX_CONNECTIONS_PER_IP=5
+```
+
+### Recommended Production Setup
+
+For a secure production deployment:
+
+```bash
+# On the Discovery Service Server
+export HUBOT_DISCOVERY_TOKEN='generate-a-strong-secret-key'
+export HUBOT_ALLOWED_ORIGINS='https://yourdomain.com,https://admin.yourdomain.com'
+export HUBOT_MAX_CONNECTIONS_PER_IP=10
+export HUBOT_RATE_LIMIT_MAX_ATTEMPTS=20
+export HUBOT_RATE_LIMIT_WINDOW_MS=60000
+
+# On Worker Instances
+export HUBOT_DISCOVERY_TOKEN='generate-a-strong-secret-key'
+export HUBOT_DISCOVERY_URL='wss://yourdomain.com:3100'
+```
 
 ## How Groups Work
 

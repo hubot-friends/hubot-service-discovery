@@ -27,6 +27,7 @@ export default class DiscoveryServiceAdapter extends Adapter {
         port: this.port,
         headers: process.env.HUBOT_DISCOVERY_HEADERS ? JSON.parse(process.env.HUBOT_DISCOVERY_HEADERS) : {},
         heartbeatInterval: parseInt(process.env.HUBOT_HEARTBEAT_INTERVAL || 15000),
+        token: process.env.HUBOT_DISCOVERY_TOKEN || null, // Authentication token
         autoReconnect: true, // Enable auto-reconnection
         reconnectInterval: parseInt(process.env.HUBOT_DISCOVERY_RECONNECT_INTERVAL || 5000),
         maxReconnectAttempts: parseInt(process.env.HUBOT_DISCOVERY_MAX_RECONNECT_ATTEMPTS || 0),

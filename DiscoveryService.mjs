@@ -12,6 +12,10 @@
 //   HUBOT_DISCOVERY_TIMEOUT - Heartbeat timeout in ms (default: 30000)
 //   HUBOT_LB_STRATEGY - Load balancing strategy: round-robin, random, least-connections (default: round-robin)
 //   HUBOT_ALLOWED_ORIGINS - Comma-separated list of allowed WebSocket origins for security (default: none, allows all)
+//   HUBOT_DISCOVERY_TOKEN - Shared secret token for authentication (default: none, allows all)
+//   HUBOT_MAX_CONNECTIONS_PER_IP - Maximum connections per IP address (default: 5)
+//   HUBOT_RATE_LIMIT_WINDOW_MS - Rate limit window in ms (default: 60000 = 1 minute)
+//   HUBOT_RATE_LIMIT_MAX_ATTEMPTS - Max connection attempts per window (default: 10)
 //
 // Commands:
 //   hubot discover services - Show all registered services
@@ -58,6 +62,16 @@ export class DiscoveryService {
     this.loadBalancer = null
     this.connectedWorkers = new Map() // Map of worker websockets by instance ID
     this.pendingResponses = new Map() // Map of pending message responses
+    
+    // Security configuration
+    this.discoveryToken = process.env.HUBOT_DISCOVERY_TOKEN || null
+    this.maxConnectionsPerIP = parseInt(process.env.HUBOT_MAX_CONNECTIONS_PER_IP || 5)
+    this.rateLimitWindowMs = parseInt(process.env.HUBOT_RATE_LIMIT_WINDOW_MS || 60000)
+    this.rateLimitMaxAttempts = parseInt(process.env.HUBOT_RATE_LIMIT_MAX_ATTEMPTS || 10)
+    
+    // Security tracking
+    this.connectionsByIP = new Map() // Track connections per IP
+    this.connectionAttempts = new Map() // Track connection attempts for rate limiting
   }
 
   async start() {
@@ -97,43 +111,70 @@ export class DiscoveryService {
       ? process.env.HUBOT_ALLOWED_ORIGINS.split(',').map(o => o.trim())
       : null // null means no origin validation (backward compatible but insecure)
 
+    // Log security configuration
+    if (!allowedOrigins) {
+      this.robot.logger.warn('⚠️  Origin validation is DISABLED. Set HUBOT_ALLOWED_ORIGINS for security.')
+    }
+    if (!this.discoveryToken) {
+      this.robot.logger.warn('⚠️  Token authentication is DISABLED. Set HUBOT_DISCOVERY_TOKEN for security.')
+    }
+    if (allowedOrigins && this.discoveryToken) {
+      this.robot.logger.info('✅ Security enabled: Origin validation + Token authentication')
+    }
+
     // Start WebSocket server for service discovery
     this.wss = new WebSocketServer({ 
       port: this.discoveryPort,
       verifyClient: (info, callback) => {
-        // If no allowed origins are configured, allow all connections (backward compatible)
-        if (!allowedOrigins) {
-          this.robot.logger.warn('⚠️  WebSocket origin validation is disabled. Set HUBOT_ALLOWED_ORIGINS to enable security.')
-          callback(true)
+        const ip = info.req.socket.remoteAddress
+        
+        // Rate limiting check
+        if (!this.checkRateLimit(ip)) {
+          this.robot.logger.warn(`❌ Rate limit exceeded for IP: ${ip}`)
+          callback(false, 429, 'Too Many Requests')
           return
         }
-
-        const origin = info.origin || info.req.headers.origin
-
-        // Allow connections without origin (direct WebSocket clients, not browser-based)
-        if (!origin) {
-          callback(true)
+        
+        // Connection limit per IP check
+        const currentConnections = this.connectionsByIP.get(ip) || 0
+        if (currentConnections >= this.maxConnectionsPerIP) {
+          this.robot.logger.warn(`❌ Connection limit exceeded for IP: ${ip} (${currentConnections}/${this.maxConnectionsPerIP})`)
+          callback(false, 429, 'Too Many Connections')
           return
         }
-
-        // Validate origin against allowed list
-        if (allowedOrigins.includes(origin) || allowedOrigins.includes('*')) {
-          callback(true)
-        } else {
-          this.robot.logger.warn(`❌ Rejected WebSocket connection from unauthorized origin: ${origin}`)
-          callback(false, 403, 'Forbidden: Origin not allowed')
+        
+        // Origin validation
+        if (allowedOrigins) {
+          const origin = info.origin || info.req.headers.origin
+          
+          // Allow connections without origin (direct WebSocket clients, not browser-based)
+          if (origin) {
+            // Validate origin against allowed list
+            if (!allowedOrigins.includes(origin) && !allowedOrigins.includes('*')) {
+              this.robot.logger.warn(`❌ Rejected connection from unauthorized origin: ${origin}`)
+              callback(false, 403, 'Forbidden: Origin not allowed')
+              return
+            }
+          }
         }
+        
+        // Track connection attempt
+        this.trackConnection(ip)
+        callback(true)
       }
     })
     
     this.wss.on('connection', (ws, req) => {
       const workerId = `${req.socket.remoteAddress}:${req.socket.remotePort}`
+      const ip = req.socket.remoteAddress
       this.robot.logger.debug(`Discovery worker connected: ${workerId}`)
       this.robot.logger.debug(`Currently have ${this.connectedWorkers.size} workers in connectedWorkers map`)
       
       // Store worker connection for message routing
       ws.workerId = workerId
+      ws.ip = ip
       ws.instanceId = null // Will be set during registration
+      ws.authenticated = false // Will be set to true after token validation
       
       ws.on('message', async (data) => {
         try {
@@ -153,6 +194,10 @@ export class DiscoveryService {
       
       ws.on('close', () => {
         this.robot.logger.debug(`Discovery worker disconnected: ${workerId}`)
+        
+        // Decrement IP connection count
+        this.untrackConnection(ws.ip)
+        
         // Remove from connected workers if it was registered
         if (ws.instanceId) {
           this.connectedWorkers.delete(ws.instanceId)
@@ -204,6 +249,25 @@ export class DiscoveryService {
   }
 
   async handleDiscoveryMessage(message, ws = null) {
+    // Token validation (if configured)
+    if (this.discoveryToken && ws && !ws.authenticated) {
+      const providedToken = message.token || message.data?.token
+      
+      if (!providedToken) {
+        this.robot.logger.warn(`❌ Authentication required but no token provided from ${ws.workerId}`)
+        throw new Error('Authentication required: Missing token')
+      }
+      
+      if (providedToken !== this.discoveryToken) {
+        this.robot.logger.warn(`❌ Invalid token provided from ${ws.workerId}`)
+        throw new Error('Authentication failed: Invalid token')
+      }
+      
+      // Mark as authenticated
+      ws.authenticated = true
+      this.robot.logger.debug(`✅ Successfully authenticated ${ws.workerId}`)
+    }
+    
     switch (message.type) {
       case 'register':
         await this.registry.register(message.data.serviceName, message.data)
@@ -496,120 +560,157 @@ export class DiscoveryService {
   }
 
   registerCommands() {
-    // Command to discover other services
-    this.robot.respond(/discover\s+services?(?<serviceName>.*)?/i, async (res) => {
-      try {
-        const serviceName = res.match.groups.serviceName?.toLowerCase() ?? null
-        const result = await this.discoverServices(serviceName)
-
-        if (serviceName) {
-          const instances = result.instances?.filter(i => i.instanceId !== this.instanceId) || []
-          if (instances.length === 0) {
-            await res.reply('No other hubot instances found')
-          } else {
-            const list = instances.map(i => 
-              `• ${i.instanceId} (${i.host}:${i.port}) - ${i.metadata?.adapter || 'unknown'} adapter`
-            ).join('\n')
-            await res.reply(`Found ${instances.length} other hubot instance(s):\n${list}`)
-          }
-        } else {
-          const services = result.services || {}
-          const serviceList = Object.entries(services).map(([name, instances]) => 
-            `• ${name}: ${instances.length} instance(s)`
-          ).join('\n')
-          await res.reply(`All registered services:\n${serviceList}`)
-        }
-      } catch (error) {
-        await res.reply(`Error discovering services: ${error.message}`)
-      }
-    })
-
-    // Command to show discovery status
-    this.robot.respond(/discovery\s+status/i, async (res) => {
-      const status = []
-      status.push(`Instance ID: ${this.instanceId}`)
-      status.push(`Service Name: ${this.serviceName}`)
-      status.push(`Mode: Server`)
-      status.push(`Registered: ${this.isRegistered ? 'Yes' : 'No'}`)
-
-      if (this.registry) {
-        const allServices = this.registry.discoverAll()
-        const totalServices = Object.keys(allServices).length
-        const totalInstances = Object.values(allServices).reduce((sum, instances) => sum + instances.length, 0)
-        status.push(`Managing: ${totalServices} service(s), ${totalInstances} instance(s)`)
-      }
-      
-      await res.reply(`🔍 Service Discovery Status:\n${status.join('\n')}`)
-    })
-
-    // Load balancing commands (always available since DiscoveryService is always a server)
-    if (this.loadBalancer) {
-      // Command to show load balancer status
-      this.robot.respond(/(?:load.?balancer|lb)\s+status/i, async (res) => {
-        const stats = this.loadBalancer.getStats()
-        const allServices = this.registry.discoverAll()
-
-        // Calculate total and healthy instances from registry
-        const totalInstances = Object.values(allServices).reduce((sum, instances) => sum + instances.length, 0)
-        let healthyInstances = 0
-        for (const serviceName of Object.keys(allServices)) {
-          healthyInstances += this.registry.getHealthyInstances(serviceName).length
-        }
-        const status = []
-        status.push(`Strategy: ${stats.strategy}`)
-        status.push(`Connected Workers: ${this.connectedWorkers.size}`)
-        status.push(`Healthy Instances: ${healthyInstances}`)
-        status.push(`Total Instances: ${totalInstances}`)
-        status.push(`Pending Responses: ${this.pendingResponses.size}`)
-        
-        if (stats.strategy === 'round-robin') {
-          status.push(`Round-Robin Index: ${stats.roundRobinIndex}`)
-        }
-        
-        await res.reply(`⚖️ Load Balancer Status:\n${status.join('\n')}`)
-      })
-
-      // Command to change load balancing strategy
-      this.robot.respond(/(?:load.?balancer|lb)\s+strategy\s+(\w+)/i, async (res) => {
-        const newStrategy = res.match[1].toLowerCase()
-        
+    // Discover services command
+    this.robot.commands.register({
+      id: 'discovery.discover',
+      description: 'Discover registered services or instances of a service',
+      aliases: ['discover services', 'discover'],
+      args: {
+        serviceName: { type: 'string', required: false }
+      },
+      handler: async (ctx) => {
         try {
-          this.loadBalancer.setStrategy(newStrategy)
-          await res.reply(`✅ Load balancing strategy changed to: ${newStrategy}`)
+          const serviceName = ctx.args.serviceName?.toLowerCase() ?? null
+          const result = await this.discoverServices(serviceName)
+
+          if (serviceName) {
+            const instances = result.instances?.filter(i => i.instanceId !== this.instanceId) || []
+            if (instances.length === 0) {
+              return 'No other hubot instances found'
+            } else {
+              const list = instances.map(i => 
+                `• ${i.instanceId} (${i.host}:${i.port}) - ${i.metadata?.adapter || 'unknown'} adapter`
+              ).join('\n')
+              return `Found ${instances.length} other hubot instance(s):\n${list}`
+            }
+          } else {
+            const services = result.services || {}
+            const serviceList = Object.entries(services).map(([name, instances]) => 
+              `• ${name}: ${instances.length} instance(s)`
+            ).join('\n')
+            return `All registered services:\n${serviceList}`
+          }
         } catch (error) {
-          await res.reply(`❌ ${error.message}`)
+          return `Error discovering services: ${error.message}`
+        }
+      }
+    })
+
+    // Discovery status command
+    this.robot.commands.register({
+      id: 'discovery.status',
+      description: 'Show service discovery server status',
+      aliases: ['discovery status'],
+      handler: async (ctx) => {
+        const status = []
+        status.push(`Instance ID: ${this.instanceId}`)
+        status.push(`Service Name: ${this.serviceName}`)
+        status.push(`Mode: Server`)
+        status.push(`Registered: ${this.isRegistered ? 'Yes' : 'No'}`)
+
+        if (this.registry) {
+          const allServices = this.registry.discoverAll()
+          const totalServices = Object.keys(allServices).length
+          const totalInstances = Object.values(allServices).reduce((sum, instances) => sum + instances.length, 0)
+          status.push(`Managing: ${totalServices} service(s), ${totalInstances} instance(s)`)
+        }
+        
+        return `🔍 Service Discovery Status:\n${status.join('\n')}`
+      }
+    })
+
+    // Load balancer status command
+    if (this.loadBalancer) {
+      this.robot.commands.register({
+        id: 'discovery.lb.status',
+        description: 'Show load balancer status',
+        aliases: ['load balancer status', 'lb status'],
+        handler: async (ctx) => {
+          const stats = this.loadBalancer.getStats()
+          const allServices = this.registry.discoverAll()
+
+          const totalInstances = Object.values(allServices).reduce((sum, instances) => sum + instances.length, 0)
+          let healthyInstances = 0
+          for (const serviceName of Object.keys(allServices)) {
+            healthyInstances += this.registry.getHealthyInstances(serviceName).length
+          }
+          const status = []
+          status.push(`Strategy: ${stats.strategy}`)
+          status.push(`Connected Workers: ${this.connectedWorkers.size}`)
+          status.push(`Healthy Instances: ${healthyInstances}`)
+          status.push(`Total Instances: ${totalInstances}`)
+          status.push(`Pending Responses: ${this.pendingResponses.size}`)
+          
+          if (stats.strategy === 'round-robin') {
+            status.push(`Round-Robin Index: ${stats.roundRobinIndex}`)
+          }
+          
+          return `⚖️ Load Balancer Status:\n${status.join('\n')}`
         }
       })
 
-      // Command to reset round-robin counter
-      this.robot.respond(/(?:load.?balancer|lb)\s+reset/i, async (res) => {
-        this.loadBalancer.resetRoundRobin()
-        await res.reply('✅ Round-robin counter reset')
-      })
-
-      this.robot.respond(/check all workers/i, async res => {
-
-      })
-
-      // Command to test message routing
-      this.robot.respond(/test\s+routing(?:\s+(.+))?/i, async (res) => {
-        const testMessage = res.match[1] || 'Test message'
-        const message = new TextMessage(
-          { id: 'test-user', name: 'Test User', room: res.message.room },
-          `@${this.robot.name} ${testMessage}`,
-          `test-${Date.now()}`
-        )
-
-        const result = await this.routeMessage(message)
-
-        if (result.success) {
-          await res.reply(`✅ Test message routed to: ${result.routedTo}`)
-        } else {
-          await res.reply(`❌ Failed to route test message: ${result.error}`)
+      // Load balancer strategy command
+      this.robot.commands.register({
+        id: 'discovery.lb.strategy',
+        description: 'Change load balancing strategy',
+        aliases: ['load balancer strategy', 'lb strategy'],
+        args: {
+          strategy: { 
+            type: 'enum', 
+            values: ['round-robin', 'random', 'least-connections'],
+            required: true,
+            description: 'Load balancing strategy to use'
+          }
+        },
+        handler: async (ctx) => {
+          try {
+            const newStrategy = ctx.args.strategy.toLowerCase()
+            this.loadBalancer.setStrategy(newStrategy)
+            return `✅ Load balancing strategy changed to: ${newStrategy}`
+          } catch (error) {
+            return `❌ ${error.message}`
+          }
         }
       })
 
-      // This is where the incoming message from the chat provider is intercepted.
+      // Load balancer reset command
+      this.robot.commands.register({
+        id: 'discovery.lb.reset',
+        description: 'Reset round-robin load balancer counter',
+        aliases: ['load balancer reset', 'lb reset'],
+        handler: async (ctx) => {
+          this.loadBalancer.resetRoundRobin()
+          return '✅ Round-robin counter reset'
+        }
+      })
+
+      // Test routing command
+      this.robot.commands.register({
+        id: 'discovery.test.routing',
+        description: 'Test message routing to worker instances',
+        aliases: ['test routing'],
+        args: {
+          message: { type: 'string', required: false }
+        },
+        handler: async (ctx) => {
+          const testMessage = ctx.args.message || 'Test message'
+          const message = new TextMessage(
+            { id: 'test-user', name: 'Test User', room: ctx.room },
+            `@${this.robot.name} ${testMessage}`,
+            `test-${Date.now()}`
+          )
+
+          const result = await this.routeMessage(message)
+
+          if (result[0]?.success) {
+            return `✅ Test message routed to: ${result[0].routedTo}`
+          } else {
+            return `❌ Failed to route test message: ${result[0]?.error || 'Unknown error'}`
+          }
+        }
+      })
+
+      // Message routing middleware - not a command, but part of the routing logic
       this.robot.receiveMiddleware(async context => {
         if (!this.robot.listeners.some(listener => {
           return listener instanceof TextListener && listener.matcher(context.response.message)
@@ -621,7 +722,6 @@ export class DiscoveryService {
         }
         return true
       })
-      
     }
   }
 
@@ -680,10 +780,45 @@ export class DiscoveryService {
     
     this.robot.logger.info('Service discovery stopped')
   }
+  
+  // Security helper methods
+  checkRateLimit(ip) {
+    const now = Date.now()
+    const attempts = this.connectionAttempts.get(ip) || []
+    
+    // Remove old attempts outside the window
+    const recentAttempts = attempts.filter(timestamp => now - timestamp < this.rateLimitWindowMs)
+    
+    if (recentAttempts.length >= this.rateLimitMaxAttempts) {
+      return false
+    }
+    
+    // Add current attempt
+    recentAttempts.push(now)
+    this.connectionAttempts.set(ip, recentAttempts)
+    
+    return true
+  }
+  
+  trackConnection(ip) {
+    const count = this.connectionsByIP.get(ip) || 0
+    this.connectionsByIP.set(ip, count + 1)
+    this.robot.logger.debug(`IP ${ip} now has ${count + 1} connection(s)`)
+  }
+  
+  untrackConnection(ip) {
+    const count = this.connectionsByIP.get(ip) || 0
+    if (count <= 1) {
+      this.connectionsByIP.delete(ip)
+      this.robot.logger.debug(`IP ${ip} removed from tracking`)
+    } else {
+      this.connectionsByIP.set(ip, count - 1)
+      this.robot.logger.debug(`IP ${ip} now has ${count - 1} connection(s)`)
+    }
+  }
 }
 
 export default async robot => {
-  robot.parseHelp(__filename)
   const discoveryService = new DiscoveryService(robot)
   robot.discoveryService = discoveryService
   await discoveryService.start()

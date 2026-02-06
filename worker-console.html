@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Worker Console</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: #1e1e1e;
+            color: #d4d4d4;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .header {
+            background: #252526;
+            padding: 1rem;
+            border-bottom: 1px solid #3e3e42;
+        }
+        
+        .header h1 {
+            font-size: 1.25rem;
+            margin-bottom: 0.5rem;
+        }
+        
+        .status {
+            display: flex;
+            gap: 1rem;
+            font-size: 0.875rem;
+        }
+        
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .status-indicator {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #666;
+        }
+        
+        .status-indicator.connected {
+            background: #4caf50;
+            box-shadow: 0 0 8px #4caf50;
+        }
+        
+        .status-indicator.disconnected {
+            background: #f44336;
+        }
+        
+        .config {
+            background: #2d2d30;
+            padding: 1rem;
+            border-bottom: 1px solid #3e3e42;
+        }
+        
+        .config-row {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 0.5rem;
+        }
+        
+        .config-row label {
+            font-size: 0.875rem;
+            color: #9cdcfe;
+        }
+        
+        .config-row input {
+            flex: 1;
+            background: #3c3c3c;
+            border: 1px solid #555;
+            color: #d4d4d4;
+            padding: 0.25rem 0.5rem;
+            border-radius: 3px;
+        }
+        
+        .config-row button {
+            padding: 0.25rem 1rem;
+            background: #0e639c;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        
+        .config-row button:hover {
+            background: #1177bb;
+        }
+        
+        .config-row button:disabled {
+            background: #555;
+            cursor: not-allowed;
+        }
+        
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        
+        .messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 1rem;
+        }
+        
+        .message {
+            background: #2d2d30;
+            border: 1px solid #3e3e42;
+            border-radius: 4px;
+            padding: 0.75rem;
+            margin-bottom: 0.75rem;
+        }
+        
+        .message-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 0.5rem;
+            font-size: 0.875rem;
+        }
+        
+        .message-user {
+            color: #4ec9b0;
+            font-weight: 600;
+        }
+        
+        .message-time {
+            color: #858585;
+        }
+        
+        .message-text {
+            color: #d4d4d4;
+            margin-bottom: 0.5rem;
+            word-wrap: break-word;
+        }
+        
+        .message-meta {
+            font-size: 0.75rem;
+            color: #858585;
+            display: flex;
+            gap: 1rem;
+        }
+        
+        .response-panel {
+            background: #252526;
+            border-top: 1px solid #3e3e42;
+            padding: 1rem;
+        }
+        
+        .response-panel textarea {
+            width: 100%;
+            background: #3c3c3c;
+            border: 1px solid #555;
+            color: #d4d4d4;
+            padding: 0.75rem;
+            border-radius: 3px;
+            font-family: inherit;
+            font-size: 0.875rem;
+            resize: vertical;
+            min-height: 100px;
+        }
+        
+        .response-controls {
+            display: flex;
+            gap: 0.5rem;
+            margin-top: 0.5rem;
+        }
+        
+        .response-controls button {
+            padding: 0.5rem 1rem;
+            background: #0e639c;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 0.875rem;
+        }
+        
+        .response-controls button:hover:not(:disabled) {
+            background: #1177bb;
+        }
+        
+        .response-controls button:disabled {
+            background: #555;
+            cursor: not-allowed;
+        }
+        
+        .response-controls button.clear {
+            background: #555;
+        }
+        
+        .response-controls button.clear:hover {
+            background: #666;
+        }
+        
+        .log {
+            background: #1e1e1e;
+            border-top: 1px solid #3e3e42;
+            padding: 0.5rem 1rem;
+            max-height: 150px;
+            overflow-y: auto;
+            font-size: 0.75rem;
+            font-family: 'Courier New', monospace;
+        }
+        
+        .log-entry {
+            margin-bottom: 0.25rem;
+        }
+        
+        .log-entry.error {
+            color: #f48771;
+        }
+        
+        .log-entry.info {
+            color: #4fc1ff;
+        }
+        
+        .log-entry.success {
+            color: #89d185;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Worker Console</h1>
+        <div class="status">
+            <div class="status-item">
+                <span class="status-indicator" id="connectionStatus"></span>
+                <span id="connectionText">Disconnected</span>
+            </div>
+            <div class="status-item">
+                <span>Instance: <strong id="instanceIdDisplay">-</strong></span>
+            </div>
+            <div class="status-item">
+                <span>Messages: <strong id="messageCount">0</strong></span>
+            </div>
+        </div>
+    </div>
+    
+    <div class="config">
+        <div class="config-row">
+            <label>Discovery URL:</label>
+            <input type="text" id="discoveryUrl" value="ws://localhost:3100" />
+        </div>
+        <div class="config-row">
+            <label>Service Name:</label>
+            <input type="text" id="serviceName" value="hubot" />
+            <label>Instance ID:</label>
+            <input type="text" id="instanceId" value="" />
+        </div>
+        <div class="config-row">
+            <label>Auth Token:</label>
+            <input type="password" id="authToken" value="" placeholder="Leave empty if not required" />
+            <button id="connectBtn">Connect</button>
+            <button id="disconnectBtn" disabled>Disconnect</button>
+        </div>
+    </div>
+    
+    <div class="main-content">
+        <div class="messages" id="messages">
+            <div class="message-meta">Waiting for messages...</div>
+        </div>
+        
+        <div class="response-panel">
+            <textarea id="responseText" placeholder="Type your response here..."></textarea>
+            <div class="response-controls">
+                <button id="sendBtn" disabled>Send Response</button>
+                <button id="clearBtn" class="clear">Clear</button>
+                <span style="color: #858585; margin-left: auto; font-size: 0.75rem;">Responding to message ID: <span id="currentMessageId">-</span></span>
+            </div>
+        </div>
+    </div>
+    
+    <div class="log" id="log"></div>
+
+    <script>
+        class WorkerConsole {
+            constructor() {
+                this.ws = null
+                this.connected = false
+                this.registered = false
+                this.discoveryUrl = null
+                this.serviceName = null
+                this.instanceId = null
+                this.authToken = null
+                this.messageCount = 0
+                this.currentMessage = null
+                this.heartbeatTimer = null
+                
+                this.initializeUI()
+                this.setupEventListeners()
+                
+                // Generate instance ID if not set
+                const storedInstanceId = localStorage.getItem('workerConsoleInstanceId')
+                if (storedInstanceId) {
+                    document.getElementById('instanceId').value = storedInstanceId
+                } else {
+                    const newId = 'worker-console-' + Date.now()
+                    document.getElementById('instanceId').value = newId
+                    localStorage.setItem('workerConsoleInstanceId', newId)
+                }
+            }
+            
+            initializeUI() {
+                this.updateConnectionStatus(false)
+            }
+            
+            setupEventListeners() {
+                document.getElementById('connectBtn').addEventListener('click', () => this.connect())
+                document.getElementById('disconnectBtn').addEventListener('click', () => this.disconnect())
+                document.getElementById('sendBtn').addEventListener('click', () => this.sendResponse())
+                document.getElementById('clearBtn').addEventListener('click', () => this.clearResponse())
+                
+                document.getElementById('responseText').addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                        this.sendResponse()
+                    }
+                })
+            }
+            
+            async connect() {
+                this.discoveryUrl = document.getElementById('discoveryUrl').value
+                this.serviceName = document.getElementById('serviceName').value
+                this.instanceId = document.getElementById('instanceId').value
+                this.authToken = document.getElementById('authToken').value
+                
+                if (!this.discoveryUrl || !this.serviceName || !this.instanceId) {
+                    this.log('Please fill in Discovery URL, Service Name, and Instance ID', 'error')
+                    return
+                }
+                
+                // Save instance ID
+                localStorage.setItem('workerConsoleInstanceId', this.instanceId)
+                
+                try {
+                    this.log('Connecting to ' + this.discoveryUrl, 'info')
+                    
+                    this.ws = new WebSocket(this.discoveryUrl)
+                    
+                    this.ws.onopen = () => {
+                        this.connected = true
+                        this.updateConnectionStatus(true)
+                        this.log('Connected successfully', 'success')
+                        this.register()
+                        this.startHeartbeat()
+                    }
+                    
+                    this.ws.onmessage = (event) => {
+                        try {
+                            const message = JSON.parse(event.data)
+                            this.handleMessage(message)
+                        } catch (error) {
+                            this.log('Failed to parse message: ' + error.message, 'error')
+                        }
+                    }
+                    
+                    this.ws.onclose = (event) => {
+                        this.connected = false
+                        this.registered = false
+                        this.updateConnectionStatus(false)
+                        this.stopHeartbeat()
+                        
+                        if (event.code === 1006) {
+                            this.log('Connection failed: Unable to connect to ' + this.discoveryUrl, 'error')
+                            this.log('Make sure the discovery service is running', 'error')
+                        } else if (event.code === 403) {
+                            this.log('Connection rejected: Origin not allowed', 'error')
+                            this.log('Add http://localhost:8080 to HUBOT_ALLOWED_ORIGINS', 'error')
+                        } else {
+                            this.log('Disconnected: ' + event.code + (event.reason ? ' ' + event.reason : ''), 'info')
+                        }
+                    }
+                    
+                    this.ws.onerror = (event) => {
+                        // WebSocket errors don't provide much detail, wait for onclose for more info
+                        this.log('WebSocket connection error', 'error')
+                    }
+                    
+                } catch (error) {
+                    this.log('Connection failed: ' + error.message, 'error')
+                }
+            }
+            
+            disconnect() {
+                if (this.ws) {
+                    this.deregister()
+                    setTimeout(() => {
+                        this.ws.close()
+                        this.ws = null
+                    }, 100)
+                }
+            }
+            
+            async register() {
+                // Check if token is required but not provided
+                const discoveryUrl = document.getElementById('discoveryUrl').value
+                if (this.authToken === '' && discoveryUrl.includes('localhost:3100')) {
+                    // Only warn for localhost - in production, token is likely required
+                    this.log('⚠️  No token provided. Connection may be rejected if server requires authentication.', 'info')
+                }
+                
+                const registerMessage = {
+                    type: 'register',
+                    token: this.authToken || undefined,
+                    data: {
+                        serviceName: this.serviceName,
+                        instanceId: this.instanceId,
+                        host: 'localhost',
+                        port: 8080,  // Port where this console is served
+                        isServer: false,
+                        metadata: {
+                            adapter: 'worker-console',
+                            version: '1.0.0',
+                            capabilities: ['chat', 'manual-response']
+                        }
+                    }
+                }
+                
+                this.sendMessage(registerMessage)
+                this.registered = true
+                this.log('Registered as ' + this.instanceId, 'success')
+            }
+            
+            async deregister() {
+                if (!this.connected) return
+                
+                const deregisterMessage = {
+                    type: 'deregister',
+                    data: {
+                        serviceName: this.serviceName,
+                        instanceId: this.instanceId
+                    }
+                }
+                
+                this.sendMessage(deregisterMessage)
+                this.log('Deregistered', 'info')
+            }
+            
+            sendMessage(message) {
+                if (!this.connected || !this.ws || this.ws.readyState !== WebSocket.OPEN) {
+                    this.log('Cannot send message: not connected', 'error')
+                    return
+                }
+                
+                this.ws.send(JSON.stringify(message))
+            }
+            
+            handleMessage(message) {
+                // Handle success/error responses without type field
+                if (message.success !== undefined) {
+                    if (message.success) {
+                        if (message.message) {
+                            this.log(message.message, 'success')
+                        }
+                    } else {
+                        const error = message.error || 'Unknown error'
+                        this.log('Error: ' + error, 'error')
+                        
+                        // Disconnect on authentication errors
+                        if (error.includes('Authentication') || error.includes('token')) {
+                            this.log('Authentication failed - disconnecting', 'error')
+                            setTimeout(() => this.disconnect(), 500)
+                        }
+                    }
+                    return
+                }
+                
+                switch (message.type) {
+                    case 'message':
+                        this.displayMessage(message.data)
+                        break
+                    case 'register_response':
+                        this.log('Registration confirmed', 'success')
+                        break
+                    case 'health_check':
+                        this.sendMessage({
+                            type: 'health_response',
+                            data: {
+                                instanceId: this.instanceId,
+                                status: 'healthy',
+                                timestamp: Date.now()
+                            }
+                        })
+                        break
+                    default:
+                        this.log('Received: ' + message.type, 'info')
+                }
+            }
+            
+            displayMessage(messageData) {
+                this.messageCount++
+                document.getElementById('messageCount').textContent = this.messageCount
+                
+                this.currentMessage = messageData
+                document.getElementById('currentMessageId').textContent = messageData.messageId || messageData.id || '-'
+                document.getElementById('sendBtn').disabled = false
+                
+                const messagesDiv = document.getElementById('messages')
+                
+                // Clear "waiting" message if it's the first message
+                if (this.messageCount === 1) {
+                    messagesDiv.innerHTML = ''
+                }
+                
+                const messageEl = document.createElement('div')
+                messageEl.className = 'message'
+                
+                const time = new Date(messageData.timestamp || Date.now()).toLocaleTimeString()
+                
+                messageEl.innerHTML = `
+                    <div class="message-header">
+                        <span class="message-user">${messageData.user?.name || messageData.user?.id || 'Unknown'}</span>
+                        <span class="message-time">${time}</span>
+                    </div>
+                    <div class="message-text">${this.escapeHtml(messageData.text || '')}</div>
+                    <div class="message-meta">
+                        <span>Room: ${messageData.room || 'general'}</span>
+                        <span>ID: ${messageData.messageId || messageData.id || '-'}</span>
+                        <span>From: ${messageData.instanceId || '-'}</span>
+                    </div>
+                `
+                
+                messagesDiv.appendChild(messageEl)
+                messagesDiv.scrollTop = messagesDiv.scrollHeight
+                
+                this.log('Message received from ' + (messageData.user?.name || 'unknown'), 'info')
+            }
+            
+            sendResponse() {
+                if (!this.currentMessage) {
+                    this.log('No message to respond to', 'error')
+                    return
+                }
+                
+                const responseText = document.getElementById('responseText').value.trim()
+                if (!responseText) {
+                    this.log('Response text is empty', 'error')
+                    return
+                }
+                
+                const responseMessage = {
+                    type: 'message_response',
+                    data: {
+                        type: 'chat_message',
+                        room: this.currentMessage.room,
+                        user: this.currentMessage.user,
+                        text: responseText,
+                        timestamp: Date.now(),
+                        instanceId: this.instanceId,
+                        id: this.currentMessage.id,
+                        messageId: this.currentMessage.messageId
+                    }
+                }
+                
+                this.sendMessage(responseMessage)
+                this.log('Response sent: ' + responseText.substring(0, 50), 'success')
+                this.clearResponse()
+            }
+            
+            clearResponse() {
+                document.getElementById('responseText').value = ''
+            }
+            
+            startHeartbeat() {
+                this.heartbeatTimer = setInterval(() => {
+                    if (this.connected && this.ws && this.ws.readyState === WebSocket.OPEN) {
+                        this.sendMessage({
+                            type: 'heartbeat',
+                            data: {
+                                serviceName: this.serviceName,
+                                instanceId: this.instanceId
+                            }
+                        })
+                    }
+                }, 15000)
+            }
+            
+            stopHeartbeat() {
+                if (this.heartbeatTimer) {
+                    clearInterval(this.heartbeatTimer)
+                    this.heartbeatTimer = null
+                }
+            }
+            
+            updateConnectionStatus(connected) {
+                const statusIndicator = document.getElementById('connectionStatus')
+                const statusText = document.getElementById('connectionText')
+                const connectBtn = document.getElementById('connectBtn')
+                const disconnectBtn = document.getElementById('disconnectBtn')
+                const instanceIdDisplay = document.getElementById('instanceIdDisplay')
+                
+                if (connected) {
+                    statusIndicator.classList.add('connected')
+                    statusIndicator.classList.remove('disconnected')
+                    statusText.textContent = 'Connected'
+                    connectBtn.disabled = true
+                    disconnectBtn.disabled = false
+                    instanceIdDisplay.textContent = this.instanceId
+                } else {
+                    statusIndicator.classList.remove('connected')
+                    statusIndicator.classList.add('disconnected')
+                    statusText.textContent = 'Disconnected'
+                    connectBtn.disabled = false
+                    disconnectBtn.disabled = true
+                    instanceIdDisplay.textContent = '-'
+                    document.getElementById('sendBtn').disabled = true
+                }
+            }
+            
+            log(message, type = 'info') {
+                const logDiv = document.getElementById('log')
+                const entry = document.createElement('div')
+                entry.className = 'log-entry ' + type
+                entry.textContent = '[' + new Date().toLocaleTimeString() + '] ' + message
+                logDiv.appendChild(entry)
+                logDiv.scrollTop = logDiv.scrollHeight
+                
+                // Keep only last 100 log entries
+                while (logDiv.children.length > 100) {
+                    logDiv.removeChild(logDiv.firstChild)
+                }
+            }
+            
+            escapeHtml(text) {
+                const div = document.createElement('div')
+                div.textContent = text
+                return div.innerHTML
+            }
+        }
+        
+        // Initialize the console
+        const console = new WorkerConsole()
+    </script>
+</body>
+</html>
