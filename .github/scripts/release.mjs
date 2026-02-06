@@ -99,6 +99,87 @@ const writePackageJson = async (pkgPath, pkg) => {
   await fs.writeFile(pkgPath, json, 'utf8')
 }
 
+const getRepoInfo = () => {
+  const full = String(process.env.GITHUB_REPOSITORY || '').trim()
+  if (!full) return null
+  const [owner, repo] = full.split('/')
+  if (!owner || !repo) return null
+  return { owner, repo }
+}
+
+const buildReleaseNotes = commits => {
+  if (!commits.length) return 'No notable changes.'
+  const lines = commits.map(block => {
+    const subject = block.split('\n')[0].trim()
+    return subject ? `- ${subject}` : ''
+  }).filter(Boolean)
+  return lines.length ? lines.join('\n') : 'No notable changes.'
+}
+
+const githubRequest = async (url, options = {}) => {
+  const token = String(process.env.GITHUB_TOKEN || '').trim()
+  if (!token) throw new Error('GITHUB_TOKEN not set')
+
+  const headers = {
+    'accept': 'application/vnd.github+json',
+    'authorization': `Bearer ${token}`,
+    'x-github-api-version': '2022-11-28',
+    ...options.headers
+  }
+
+  const res = await fetch(url, { ...options, headers })
+  const text = await res.text()
+  const data = text ? JSON.parse(text) : null
+
+  if (!res.ok) {
+    const msg = data && data.message ? data.message : `GitHub API error ${res.status}`
+    throw new Error(msg)
+  }
+
+  return data
+}
+
+const createGitHubRelease = async (tag, commits) => {
+  if (['1', 'true', 'yes'].includes(String(process.env.SKIP_GITHUB_RELEASE || '').toLowerCase())) {
+    console.log('SKIP_GITHUB_RELEASE set — skipping GitHub release creation')
+    return
+  }
+
+  const repo = getRepoInfo()
+  if (!repo) {
+    console.log('GITHUB_REPOSITORY not set — skipping GitHub release creation')
+    return
+  }
+
+  const apiBase = `https://api.github.com/repos/${repo.owner}/${repo.repo}`
+
+  try {
+    await githubRequest(`${apiBase}/releases/tags/${tag}`)
+    console.log(`GitHub release for ${tag} already exists — skipping`)
+    return
+  } catch (err) {
+    if (!String(err.message || '').includes('Not Found')) {
+      console.log(`GitHub release check failed: ${err.message}`)
+    }
+  }
+
+  const body = buildReleaseNotes(commits)
+
+  await githubRequest(`${apiBase}/releases`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      tag_name: tag,
+      name: tag,
+      body,
+      draft: false,
+      prerelease: false
+    })
+  })
+
+  console.log(`GitHub release created for ${tag}`)
+}
+
 const main = async () => {
   const isDryRun = process.argv.includes('--dry-run') || ['1', 'true', 'yes'].includes(String(process.env.DRY_RUN || '').toLowerCase())
 
@@ -183,6 +264,12 @@ const main = async () => {
   const branch = await run('git rev-parse --abbrev-ref HEAD')
   await run(`git push origin ${branch}`)
   await run(`git push origin ${newTag}`)
+
+  try {
+    await createGitHubRelease(newTag, commits)
+  } catch (err) {
+    console.log(`GitHub release creation failed: ${err.message}`)
+  }
 
   console.log(`released ${newTag} from base ${lastTag} and pushed changes`)
   if (process.env.GITHUB_OUTPUT) {
