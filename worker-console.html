@@ -521,14 +521,14 @@
                 
                 messageEl.innerHTML = `
                     <div class="message-header">
-                        <span class="message-user">${messageData.user?.name || messageData.user?.id || 'Unknown'}</span>
-                        <span class="message-time">${time}</span>
+                        <span class="message-user">${this.escapeHtml(messageData.user?.name || messageData.user?.id || 'Unknown')}</span>
+                        <span class="message-time">${this.escapeHtml(time)}</span>
                     </div>
                     <div class="message-text">${this.escapeHtml(messageData.text || '')}</div>
                     <div class="message-meta">
-                        <span>Room: ${messageData.room || 'general'}</span>
-                        <span>ID: ${messageData.messageId || messageData.id || '-'}</span>
-                        <span>From: ${messageData.instanceId || '-'}</span>
+                        <span>Room: ${this.escapeHtml(messageData.room || 'general')}</span>
+                        <span>ID: ${this.escapeHtml(messageData.messageId || messageData.id || '-')}</span>
+                        <span>From: ${this.escapeHtml(messageData.instanceId || '-')}</span>
                     </div>
                 `
                 
