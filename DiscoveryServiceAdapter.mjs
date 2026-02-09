@@ -197,7 +197,7 @@ export default class DiscoveryServiceAdapter extends Adapter {
     
     const commands = this.robot.commands.listCommands()
     
-    return commands.map(cmd => ({
+    return commands.filter(cmd => cmd.id !== 'help').map(cmd => ({
       id: cmd.id,
       description: cmd.description || 'No description',
       aliases: cmd.aliases || [],
