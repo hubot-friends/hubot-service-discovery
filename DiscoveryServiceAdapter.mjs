@@ -143,8 +143,8 @@ export default class DiscoveryServiceAdapter extends Adapter {
           text: str,
           timestamp: Date.now(),
           instanceId: this.instanceId,
-          id: envelope.message.id,
-          messageId: envelope.message.messageId
+          id: envelope.message?.id ?? `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          messageId: envelope.message?.messageId ?? `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
         }
         
         await this.client.sendMessage({

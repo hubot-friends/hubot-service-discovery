@@ -444,17 +444,47 @@ describe('DiscoveryService Load Balancing Integration', () => {
       assert(result.error.includes('messageId is required'))
     })
 
-    test('should handle response for unknown messageId', () => {
+    test('should handle unsolicited message (no pending message)', () => {
+      // Clear sent messages from previous tests
+      mockRobot.sentMessages = []
+      
       const responseData = {
-        messageId: 'unknown-msg-123',
-        text: 'Hello back!',
+        messageId: 'unsolicited-msg-123',
+        instanceId: 'worker-1',
+        text: 'Proactive notification from worker!',
         room: 'general'
       }
 
       const result = DiscoveryService.handleMessageResponse(responseData)
 
-      assert.strictEqual(result.success, false)
-      assert(result.error.includes('Unknown messageId'))
+      assert.strictEqual(result.success, true)
+      assert.strictEqual(result.processed, true)
+      assert.strictEqual(result.unsolicited, true)
+      
+      // Message should still be delivered to the room
+      assert.strictEqual(mockRobot.sentMessages.length, 1)
+      assert.strictEqual(mockRobot.sentMessages[0].text, 'Proactive notification from worker!')
+      assert.strictEqual(mockRobot.sentMessages[0].room, 'general')
+    })
+    
+    test('should handle unsolicited message without room (defaults to general)', () => {
+      // Clear sent messages from previous tests
+      mockRobot.sentMessages = []
+      
+      const responseData = {
+        messageId: 'unsolicited-msg-456',
+        instanceId: 'worker-2',
+        text: 'Event notification'
+      }
+
+      const result = DiscoveryService.handleMessageResponse(responseData)
+
+      assert.strictEqual(result.success, true)
+      assert.strictEqual(result.unsolicited, true)
+      
+      // Message should be delivered to default room
+      assert.strictEqual(mockRobot.sentMessages.length, 1)
+      assert.strictEqual(mockRobot.sentMessages[0].room, 'general')
     })
   })
 

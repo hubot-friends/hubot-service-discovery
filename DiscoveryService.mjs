@@ -502,8 +502,16 @@ export class DiscoveryService {
     const pendingMessage = this.pendingResponses.get(messageId)
     
     if (!pendingMessage) {
-      this.robot.logger.warn(`Received response for unknown message: ${messageId}`)
-      return { success: false, error: 'Unknown messageId' }
+      // No pending message - treat as unsolicited message from worker
+      // This allows workers to proactively send notifications, events, etc.
+      this.robot.logger.debug(`Received unsolicited message from instance ${instanceId} (messageId: ${messageId})`)
+      
+      // Still send the message to the room if text is provided
+      if (this.robot && responseData.text) {
+        this.robot.messageRoom(responseData.room || 'general', responseData.text)
+      }
+      
+      return { success: true, processed: true, unsolicited: true }
     }
 
     // Check if we've already processed a response from this instance
