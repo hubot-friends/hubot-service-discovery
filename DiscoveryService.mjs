@@ -1,33 +1,3 @@
-// Description:
-//   Hubot service discovery script for distributed Hubot clusters
-//
-// Configuration (Discovery Service Server):
-//   HUBOT_SERVICE_NAME - Service name for registration (default: 'hubot')
-//   HUBOT_INSTANCE_ID - Unique instance identifier (default: generated as hubot-<Date.now()>)
-//   HUBOT_HOST - Host address for this instance (default: 'localhost')
-//   HUBOT_PORT - Port for this instance (default: 8080)
-//   HUBOT_HEARTBEAT_INTERVAL - Heartbeat interval in ms (default: 15000)
-//   HUBOT_DISCOVERY_PORT - Port for the discovery server (default: 3100)
-//   HUBOT_DISCOVERY_STORAGE - Storage directory for event store (default: ../data from current working directory)
-//   HUBOT_DISCOVERY_TIMEOUT - Heartbeat timeout in ms (default: 30000)
-//   HUBOT_LB_STRATEGY - Load balancing strategy: round-robin, random, least-connections (default: round-robin)
-//   HUBOT_ALLOWED_ORIGINS - Comma-separated list of allowed WebSocket origins for security (default: none, allows all)
-//   HUBOT_DISCOVERY_TOKEN - Shared secret token for authentication (default: none, allows all)
-//   HUBOT_MAX_CONNECTIONS_PER_IP - Maximum connections per IP address (default: 5)
-//   HUBOT_RATE_LIMIT_WINDOW_MS - Rate limit window in ms (default: 60000 = 1 minute)
-//   HUBOT_RATE_LIMIT_MAX_ATTEMPTS - Max connection attempts per window (default: 10)
-//
-// Commands:
-//   hubot discover services - Show all registered services
-//   hubot discovery status - Show service discovery status
-//   hubot load balancer status - Show load balancer statistics
-//   hubot lb strategy <strategy> - Change load balancing strategy
-//   hubot lb reset - Reset round-robin counter
-//   hubot test routing [message] - Test message routing
-//
-// Author:
-//   Joey Guerra
-
 import EventStore from './lib/EventStore.mjs'
 import ServiceRegistry from './lib/ServiceRegistry.mjs'
 import LoadBalancer from './lib/LoadBalancer.mjs'
@@ -38,6 +8,16 @@ import { TextMessage, TextListener } from 'hubot'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
+
+function serializeError(error) {
+  if (error.name && error.message && error.stack) {
+    return `${error.name}: ${error.message}\n${error.stack}`
+  }
+  if (error.message && error.stack) {
+    return `${error.message}\n${error.stack}`
+  }
+  return error
+}
 
 export class DiscoveryService {
   constructor(robot) {
@@ -53,9 +33,22 @@ export class DiscoveryService {
     this.storageDir = process.env.HUBOT_DISCOVERY_STORAGE || join(process.cwd(), '../data')
     this.heartbeatTimeoutMs = parseInt(process.env.HUBOT_DISCOVERY_TIMEOUT || 30000)
     
+    // Parse WebSocket path from HUBOT_DISCOVERY_URL if set
+    this.discoveryWsPath = null
+    if (process.env.HUBOT_DISCOVERY_URL) {
+      try {
+        const url = new URL(process.env.HUBOT_DISCOVERY_URL)
+        this.discoveryWsPath = url.pathname || '/'
+      } catch (error) {
+        this.robot?.logger?.warn(`Failed to parse HUBOT_DISCOVERY_URL: ${error.message}`)
+      }
+    }
+    
     // State - DiscoveryService is always a server
     this.registry = null
     this.wss = null
+    this.upgradeHandler = null // Store reference to upgrade handler for cleanup
+    this.started = false
     this.isRegistered = false
     
     // Load balancing state
@@ -76,17 +69,23 @@ export class DiscoveryService {
 
   async start() {
     try {
+      if (this.started) {
+        return
+      }
+      this.started = true
+
       await this.startDiscoveryServer()
-      
+
       // Start periodic cleanup of pending responses
       this.cleanupTimer = setInterval(() => {
         this.cleanupPendingResponses()
       }, 30000) // Clean up every 30 seconds
-      
+
       this.registerCommands()
       this.robot.logger.info(`Service discovery server initialized for ${this.instanceId}`)
     } catch (error) {
-      this.robot.logger.error('Failed to initialize service discovery:', error)
+      this.started = false
+      this.robot.logger.error(`Failed to initialize service discovery: ${serializeError(error)}`)
     }
   }
 
@@ -111,7 +110,7 @@ export class DiscoveryService {
       ? process.env.HUBOT_ALLOWED_ORIGINS.split(',').map(o => o.trim())
       : null // null means no origin validation (backward compatible but insecure)
 
-    // Log security configuration
+      // Log security configuration
     if (!allowedOrigins) {
       this.robot.logger.warn('⚠️  Origin validation is DISABLED. Set HUBOT_ALLOWED_ORIGINS for security.')
     }
@@ -123,8 +122,9 @@ export class DiscoveryService {
     }
 
     // Start WebSocket server for service discovery
-    this.wss = new WebSocketServer({ 
-      port: this.discoveryPort,
+    // Prefer binding to robot.server if available (shares port with Express)
+    // Otherwise create standalone server on separate port
+    const wsOptions = {
       verifyClient: (info, callback) => {
         const ip = info.req.socket.remoteAddress
         
@@ -162,7 +162,46 @@ export class DiscoveryService {
         this.trackConnection(ip)
         callback(true)
       }
-    })
+    }
+    if (this.robot.server) {
+      // Bind to existing Express server (shares port)
+      // Use noServer mode and manually handle upgrades
+      wsOptions.noServer = true
+      this.wss = new WebSocketServer(wsOptions)
+      
+      // Manually handle upgrade requests
+      this.upgradeHandler = (request, socket, head) => {
+        // Validate this is a WebSocket upgrade request
+        const upgrade = (request.headers.upgrade || '').toLowerCase()
+        if (upgrade !== 'websocket') {
+          this.robot.logger.debug(`Rejected non-WebSocket upgrade request: ${request.url}`)
+          socket.destroy()
+          return
+        }
+        
+        // Validate path if configured
+        if (this.discoveryWsPath && request.url !== this.discoveryWsPath) {
+          this.robot.logger.warn(`Rejected WebSocket upgrade on invalid path: ${request.url} (expected: ${this.discoveryWsPath})`)
+          socket.destroy()
+          return
+        }
+        
+        this.robot.logger.debug(`WebSocket upgrade request: ${request.url}`)
+        this.wss.handleUpgrade(request, socket, head, (ws) => {
+          this.wss.emit('connection', ws, request)
+        })
+      }
+      this.robot.server.on('upgrade', this.upgradeHandler)
+      
+      this.robot.logger.info(`🔍 Service discovery WebSocket server attached to Express on port ${this.port}`)
+      this.robot.logger.info(`   Workers should connect to: ws://localhost:${this.port}`)
+    } else {
+      // Create standalone WebSocket server on separate port
+      wsOptions.port = this.discoveryPort
+      this.wss = new WebSocketServer(wsOptions)
+      this.robot.logger.info(`🔍 Service discovery server started on separate port ${this.discoveryPort}`)
+      this.robot.logger.info(`   Workers should connect to: ws://localhost:${this.discoveryPort}`)
+    }
     
     this.wss.on('connection', (ws, req) => {
       const workerId = `${req.socket.remoteAddress}:${req.socket.remotePort}`
@@ -217,8 +256,6 @@ export class DiscoveryService {
     this.wss.on('error', (error) => {
       this.robot.logger.error('Discovery WebSocket server error:', error)
     })
-
-    this.robot.logger.info(`🔍 Service discovery server started on port ${this.discoveryPort}`)
     
     // Initialize the registry before registering self
     await this.registry.initialize()
@@ -281,7 +318,8 @@ export class DiscoveryService {
 
         if (ws && !message.data.isServer) {
           this.connectedWorkers.set(message.data.instanceId, ws)
-          this.robot.logger.debug(`Registered worker instance for load balancing: ${message.data.instanceId}, group: ${message.data.metadata?.group || 'default'}`)
+          ws.group = message.data.metadata?.group || 'default'
+          this.robot.logger.debug(`Registered worker instance for load balancing: ${message.data.instanceId}, group: ${ws.group}`)
           this.robot.logger.debug(`connectedWorkers now has ${this.connectedWorkers.size} entries`)
         } else if (ws && message.data.isServer) {
           this.robot.logger.debug(`Server instance registered: ${message.data.instanceId}, NOT added to connectedWorkers`)
@@ -342,6 +380,11 @@ export class DiscoveryService {
       case 'message_response':
         // This is a response from a client instance back to the chat provider
         return this.handleMessageResponse(message.data)
+        
+      case 'commands_response':
+        // This is a response to a get_commands request (handled by temporary listener in help command)
+        // Just acknowledge receipt without processing
+        return { success: true, received: true }
         
       default:
         throw new Error(`Unknown message type: ${message.type}`)
@@ -645,6 +688,28 @@ export class DiscoveryService {
             status.push(`Round-Robin Index: ${stats.roundRobinIndex}`)
           }
           
+          // List all instances
+          status.push('\n📋 Registered Instances:')
+          for (const serviceName of Object.keys(allServices)) {
+            const instances = allServices[serviceName]
+            if (instances.length === 0) continue
+            
+            status.push(`\n  ${serviceName}:`)
+            for (const instance of instances) {
+              const group = instance.metadata?.group || 'default'
+              const isConnected = this.connectedWorkers.has(instance.instanceId) && 
+                                 this.connectedWorkers.get(instance.instanceId)?.readyState === 1
+              const isHealthy = this.registry.getHealthyInstances(serviceName).some(i => i.instanceId === instance.instanceId)
+              const status_icon = isConnected ? '✅' : isHealthy ? '⚠️' : '❌'
+              
+              status.push(`    ${status_icon} ${instance.instanceId}`)
+              status.push(`       Group: ${group}, Host: ${instance.host}:${instance.port}`)
+              if (instance.metadata?.adapter) {
+                status.push(`       Adapter: ${instance.metadata.adapter}`)
+              }
+            }
+          }
+          
           return `⚖️ Load Balancer Status:\n${status.join('\n')}`
         }
       })
@@ -710,6 +775,94 @@ export class DiscoveryService {
         }
       })
 
+      // Help command - shows worker commands from connected instances
+      this.robot.commands.register({
+        id: 'discovery.help',
+        description: 'Show available worker commands',
+        aliases: ['discovery help', 'help discovery'],
+        handler: async (ctx) => {
+          const lines = []
+          
+          // Request commands from all connected workers
+          if (this.connectedWorkers.size === 0) {
+            lines.push('_No worker instances connected yet_')
+            return lines.join('\n')
+          }
+          
+          lines.push('👷 **Worker Commands (by group):**')
+          lines.push('')
+          
+          const messageId = `get-commands-${Date.now()}`
+          const commandsByGroup = new Map()
+          const responses = []
+          
+          // Send get_commands request to all workers
+          for (const [instanceId, ws] of this.connectedWorkers.entries()) {
+            if (ws.readyState === 1) { // OPEN
+              ws.send(JSON.stringify({
+                type: 'get_commands',
+                messageId: messageId
+              }))
+              
+              // Wait for response with timeout
+              responses.push(
+                new Promise((resolve) => {
+                  const timeout = setTimeout(() => resolve(null), 2000) // 2 second timeout
+                  
+                  const handler = (data) => {
+                    try {
+                      const msg = JSON.parse(data.toString())
+                      if (msg.type === 'commands_response' && msg.messageId === messageId) {
+                        clearTimeout(timeout)
+                        ws.off('message', handler)
+                        resolve({ instanceId, commands: msg.commands, group: ws.group, serviceName: ws.serviceName })
+                      }
+                    } catch (e) {
+                      // Ignore parse errors
+                    }
+                  }
+                  
+                  ws.on('message', handler)
+                })
+              )
+            }
+          }
+          
+          // Collect all responses
+          const results = await Promise.all(responses)
+          
+          // Organize commands by service:group
+          for (const result of results) {
+            if (result && result.commands && result.commands.length > 0) {
+              const groupKey = `${result.serviceName || 'hubot'}:${result.group || 'default'}`
+              if (!commandsByGroup.has(groupKey)) {
+                commandsByGroup.set(groupKey, {
+                  serviceName: result.serviceName || 'hubot',
+                  group: result.group || 'default',
+                  commands: result.commands
+                })
+              }
+            }
+          }
+          
+          // Display commands by group
+          if (commandsByGroup.size > 0) {
+            for (const [groupKey, groupEntry] of commandsByGroup.entries()) {
+              lines.push(`**${groupEntry.serviceName} - ${groupEntry.group}**`)
+              for (const cmd of groupEntry.commands) {
+                const aliases = cmd.aliases?.length > 0 ? ` (${cmd.aliases.join(', ')})` : ''
+                lines.push(`  • **${cmd.id}**${aliases} - ${cmd.description}`)
+              }
+              lines.push('')
+            }
+          } else {
+            lines.push('_No commands available from connected workers_')
+          }
+          
+          return lines.join('\n')
+        }
+      })
+
       // Message routing middleware - not a command, but part of the routing logic
       this.robot.receiveMiddleware(async context => {
         if (!this.robot.listeners.some(listener => {
@@ -730,6 +883,12 @@ export class DiscoveryService {
     if (this.cleanupTimer) {
       clearInterval(this.cleanupTimer)
       this.cleanupTimer = null
+    }
+    
+    // Remove upgrade handler if attached to Express
+    if (this.upgradeHandler && this.robot?.server) {
+      this.robot.server.removeListener('upgrade', this.upgradeHandler)
+      this.upgradeHandler = null
     }
     
     // Close discovery server with timeout

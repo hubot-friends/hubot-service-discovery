@@ -1,6 +1,16 @@
 import { Adapter, TextMessage } from 'hubot'
 import DiscoveryServiceClient from './lib/DiscoveryServiceClient.mjs'
 
+function serializeError(error) {
+  if (error.name && error.message && error.stack) {
+    return `${error.name}: ${error.message}\n${error.stack}`
+  }
+  if (error.message && error.stack) {
+    return `${error.message}\n${error.stack}`
+  }
+  return error
+}
+
 export default class DiscoveryServiceAdapter extends Adapter {
   constructor(robot) {
     super(robot)
@@ -45,6 +55,7 @@ export default class DiscoveryServiceAdapter extends Adapter {
   setupEventHandlers() {
     this.client.on('connected', () => {
       this.robot.logger.info(`Service discovery adapter connected to ${this.discoveryUrl}`)
+      
       if(!this.client.registered) {
         this.client.register(this.host, this.port, {
           adapter: 'service-discovery',
@@ -69,10 +80,23 @@ export default class DiscoveryServiceAdapter extends Adapter {
     })
 
     this.client.on('error', (error) => {
-      this.robot.logger.error('Service discovery adapter error:', error)
+      this.robot.logger.error(`Service discovery adapter error: ${serializeError(error)}`)
     })
 
     this.client.on('message', async (messageData) => {
+      // Handle get_commands requests from discovery service
+      if (messageData.type === 'get_commands') {
+        const commands = this.extractCommandMetadata()
+        await this.client.sendMessage({
+          type: 'commands_response',
+          messageId: messageData.messageId,
+          commands: commands
+        }).catch(error => {
+          this.robot.logger.error(`Failed to send commands response: ${serializeError(error)}`)
+        })
+        return
+      }
+      
       // Convert service discovery message to Hubot message format
       await this.handleIncomingMessage(messageData)
     })
@@ -86,8 +110,12 @@ export default class DiscoveryServiceAdapter extends Adapter {
       this.robot.logger.info(`Service discovery adapter registered as client instance id = ${this.instanceId}`)
       
       // The 'connected' event is emitted by the client when connection is established
+
+      // The adpater is required to emit the 'connected' event
+      // so the Hubot boot process can continue.
+      this.emit('connected', this)
     } catch (error) {
-      this.robot.logger.error(`Failed to start service discovery adapter: ${JSON.stringify(error)}`)
+      this.robot.logger.error(`Failed to start service discovery adapter: ${serializeError(error)}`)
     }
   }
 
@@ -101,7 +129,7 @@ export default class DiscoveryServiceAdapter extends Adapter {
       message.messageId = messageData.messageId
       await this.robot.receive(message)
     } catch (error) {
-      this.robot.logger.error('Error handling incoming message:', error)
+      this.robot.logger.error(`Error handling incoming message: ${serializeError(error)}`)
     }
   }
 
@@ -125,7 +153,7 @@ export default class DiscoveryServiceAdapter extends Adapter {
         })
       }
     } catch (error) {
-      this.robot.logger.error('Error sending message:', error)
+      this.robot.logger.error(`Error sending message: ${serializeError(error)}`)
     }
   }
 
@@ -159,6 +187,22 @@ export default class DiscoveryServiceAdapter extends Adapter {
         data: topicData
       })
     }
+  }
+
+  extractCommandMetadata() {
+    // Hubot 14+ uses CommandBus with listCommands() method
+    if (!this.robot.commands?.listCommands || typeof this.robot.commands.listCommands !== 'function') {
+      throw new Error('robot.commands must have a listCommands method (requires Hubot >= 14)')
+    }
+    
+    const commands = this.robot.commands.listCommands()
+    
+    return commands.map(cmd => ({
+      id: cmd.id,
+      description: cmd.description || 'No description',
+      aliases: cmd.aliases || [],
+      args: cmd.args || {}
+    }))
   }
 
   async close() {

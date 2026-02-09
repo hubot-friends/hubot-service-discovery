@@ -9,7 +9,7 @@ describe('EventStore', () => {
   let testDir
 
   beforeEach(() => {
-    testDir = join(process.cwd(), 'test-data', `test-${Date.now()}`)
+    testDir = join(process.cwd(), 'test-data', `test-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`)
     mkdirSync(testDir, { recursive: true })
     
     eventStore = new EventStore({
@@ -19,7 +19,18 @@ describe('EventStore', () => {
     })
   })
 
-  afterEach(() => {
+  afterEach(async () => {
+    // Clean up EventStore instance
+    if (eventStore) {
+      eventStore.removeAllListeners()
+      eventStore.initialized = false
+      eventStore.initializing = false
+    }
+    
+    // Wait a bit for any pending file operations to complete
+    await new Promise(resolve => setTimeout(resolve, 50))
+    
+    // Clean up test directory
     if (existsSync(testDir)) {
       rmSync(testDir, { recursive: true, force: true })
     }

@@ -151,6 +151,24 @@ describe('DiscoveryServiceClient', () => {
     assert.deepStrictEqual(messageReceived, testMessage.data)
   })
 
+  test('should forward get_commands messages', async () => {
+    await client.connect()
+    
+    let messageReceived = null
+    client.on('message', (data) => {
+      messageReceived = data
+    })
+    
+    const getCommandsMessage = {
+      type: 'get_commands',
+      messageId: 'test-msg-123'
+    }
+    
+    client.handleMessage(getCommandsMessage)
+    
+    assert.deepStrictEqual(messageReceived, getCommandsMessage)
+  })
+
   test('should respond to health checks', async () => {
     await client.connect()
     

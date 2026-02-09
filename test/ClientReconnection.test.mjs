@@ -101,8 +101,11 @@ describe('DiscoveryServiceClient Reconnection', () => {
   afterEach(async () => {
     if (client) {
       client.disableAutoReconnect()
+      client.removeAllListeners()
       await client.disconnect()
     }
+    // Wait for cleanup to complete
+    await new Promise(resolve => setTimeout(resolve, 50))
   })
 
   describe('Auto-reconnection configuration', () => {

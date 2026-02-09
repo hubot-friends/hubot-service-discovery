@@ -75,8 +75,8 @@ describe('DiscoveryService Load Balancing Integration', () => {
   let testDataDir
 
   beforeEach(async () => {
-    // Create temporary directory for test data
-    testDataDir = path.join(__dirname, '..', 'test-data')
+    // Create temporary directory for test data with unique name
+    testDataDir = path.join(__dirname, '..', 'test-data', `lb-test-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`)
     await fs.mkdir(testDataDir, { recursive: true })
 
     // Clean up any existing data files to ensure fresh state

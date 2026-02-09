@@ -4,14 +4,14 @@ import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
-const PORT = process.env.PORT || 8080
+const PORT = process.env.PORT || 3001
 
 const server = createServer(async (req, res) => {
     console.log(`${req.method} ${req.url}`)
 
     try {
         let filePath
-        if (req.url === '/' || req.url === '/worker-console.html') {
+        if (req.url === '/' || req.url === '/worker-console' || req.url === '/worker-console.html') {
             filePath = resolve(__dirname, 'worker-console.html')
         } else {
             res.writeHead(404, { 'Content-Type': 'text/plain' })
